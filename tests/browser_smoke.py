@@ -179,6 +179,24 @@ def test_appliance_capacity(browser, url, errors):
     assert '双关' in page.locator('body').inner_text()
     page.locator('.task-card .check').first.click()
     data = plan(page)
+    # Old steamer/stove symbols must migrate once, without swapping again on reload.
+    old_icons = {'stove': '🔥', 'oven': '▱', 'steamer': '♨️'}
+    data.pop('resourceIconVersion')
+    for resource in data['appliances']:
+        resource['icon'] = old_icons.get(resource['id'], resource['icon'])
+    original_tasks = data['tasks']
+    page.evaluate('([k,v]) => localStorage.setItem(k, JSON.stringify(v))', [KEY, data])
+    page.reload()
+    page.locator('.appliance-open').first.click()
+    page.locator('#saveAppliance').click()
+    data = plan(page)
+    assert data['tasks'] == original_tasks
+    expected = {'stove': '♨️', 'oven': '🔆', 'steamer': '🌫️'}
+    assert all(a['icon'] == expected[a['id']] for a in data['appliances'] if a['id'] in expected)
+    page.reload()
+    assert all(a['icon'] == expected[a['id']] for a in plan(page)['appliances'] if a['id'] in expected)
+    assert '排程会自动保存在当前浏览器的缓存中。' in page.locator('.page-notes .hint').inner_text()
+    assert '已自动保存' not in page.locator('body').inner_text()
     tool = data['appliances'][0]
     template = data['tasks'][0]
     intervals = [('10:00', '10:30', 0), ('10:10', '10:40', 0), ('10:20', '10:30', 1), ('10:30', '10:50', 2), ('10:50', '11:00', 3)]

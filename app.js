@@ -1,4 +1,5 @@
 const STORAGE_KEY = "banquet-kitchen-plan-v1";
+const SAVE_MESSAGE = "排程会自动保存在当前浏览器的缓存中。";
 let hourHeight = 180;
 const MIN_COLUMN_WIDTH = 64;
 const MAX_COLUMN_WIDTH = 800;
@@ -6,9 +7,10 @@ const MAX_COLUMN_WIDTH = 800;
 const DISH_STROKES = ["#2f6957", "#a87621", "#ad5c49", "#75649d", "#3c7c8a"];
 const COLORS = ["#cfe7d4", "#f4d28a", "#eaa18f", "#c9c4e7", "#b6dce4"];
 const demo = {
+  resourceIconVersion: 1,
   appliances: [
-    { id: "stove", name: "灶台", icon: "🔥" }, { id: "oven", name: "烤箱", icon: "▱" },
-    { id: "rice", name: "电饭锅", icon: "🍚" }, { id: "steamer", name: "蒸锅", icon: "♨️" }
+    { id: "stove", name: "灶台", icon: "♨️" }, { id: "oven", name: "烤箱", icon: "🔆" },
+    { id: "rice", name: "电饭锅", icon: "🍚" }, { id: "steamer", name: "蒸锅", icon: "🌫️" }
   ],
   tasks: [
     { id: "t1", name: "腌制排骨", dish: "粉蒸排骨", start: "10:00", end: "10:30", appliances: ["stove"], note: "提前入味", done: true },
@@ -55,6 +57,12 @@ try {
   state = structuredClone(demo);
   storageWarning = "无法读取缓存，当前显示示例";
 }
+// The former steamer symbol now denotes a stove; migrate once to avoid ambiguity.
+if (state.resourceIconVersion !== 1) {
+  const replacements = { "🔥": "♨️", "♨": "♨️", "♨️": "🌫️", "▱": "🔆" };
+  state.appliances.forEach(a => { a.icon = replacements[a.icon] || a.icon; });
+  state.resourceIconVersion = 1;
+}
 state.timelineStart ||= "10:00";
 if (!state.timelineEnd && state.timelineStart === "23:59") state.timelineStart = "23:58";
 // Old plans did not have an explicit end: retain their visible tasks on migration.
@@ -84,7 +92,7 @@ function save() {
   } catch {
     storageWarning = "保存失败，请勿关闭页面";
   }
-  $("saveState").textContent = storageWarning || "已自动保存";
+  $("saveState").textContent = storageWarning || SAVE_MESSAGE;
   $("saveState").classList.toggle("save-error", Boolean(storageWarning));
 }
 function minutes(time) { const [h, m] = time.split(":").map(Number); return h * 60 + m; }
@@ -186,7 +194,7 @@ function render() {
     };
     card.querySelectorAll(".resize-handle, .move-handle").forEach(handle => handle.addEventListener("pointerdown", startResize));
   });
-  $("saveState").textContent = storageWarning || "已自动保存";
+  $("saveState").textContent = storageWarning || SAVE_MESSAGE;
   $("saveState").classList.toggle("save-error", Boolean(storageWarning));
   document.querySelectorAll("[data-resize-appliance]").forEach(handle => {
     handle.addEventListener("pointerdown", startColumnResize);

@@ -172,4 +172,3 @@ button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .now-line { z-index: 2; }
 .page-notes { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-top: 10px; }
 .page-notes .hint { flex: 1; min-width: 230px; margin: 0; }
-.page-notes .save-state { white-space: nowrap; font-size: 10px; }

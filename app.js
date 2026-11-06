@@ -6,8 +6,17 @@ const MAX_COLUMN_WIDTH = 800;
 const SCALES = [1, 2, 2.5, 3, 4, 6];
 const DRAG_STEPS = [1, 5, 10, 15, 30];
 
-const DISH_STROKES = ["#2f6957", "#a87621", "#ad5c49", "#75649d", "#3c7c8a"];
-const COLORS = ["#cfe7d4", "#f4d28a", "#eaa18f", "#c9c4e7", "#b6dce4"];
+// Paired pastel fills and darker lines; keep the original first five dishes.
+const DISH_PALETTE = [
+  ["#cfe7d4", "#2f6957"], ["#f4d28a", "#a87621"],
+  ["#eaa18f", "#ad5c49"], ["#c9c4e7", "#75649d"],
+  ["#b6dce4", "#3c7c8a"], ["#efd0e1", "#9e507d"],
+  ["#dfe8b5", "#667c29"], ["#c2d4f0", "#496b9e"],
+  ["#f1cba5", "#9a632d"], ["#b9e5db", "#377e70"],
+  ["#dec7ed", "#80559b"], ["#edc3c9", "#a05565"],
+  ["#d7e5bc", "#68814a"], ["#c5e3ed", "#457e91"],
+  ["#e8dfb9", "#897b36"], ["#d7d0ef", "#706398"]
+];
 const demo = {
   resourceIconVersion: 1, visibleHours: 2.5, dragStep: 5,
   appliances: [
@@ -121,6 +130,15 @@ function esc(value) { return String(value).replace(/[&<>"']/g, (c) => ({ "&": "&
 function display(value, fallback) { return value || fallback; }
 function isPerson(resource) { return Boolean(resource && /^(👨|👩)([\u{1F3FB}-\u{1F3FF}])?\u200D🍳$/u.test(resource.icon)); }
 function dishIndex(task) { return Math.max(0, state.dishes.findIndex(d => d.id === task.dishId)); }
+function dishColors(task) {
+  const index = dishIndex(task);
+  if (index < DISH_PALETTE.length) return DISH_PALETTE[index];
+  // Spread additional dishes around the color wheel instead of repeating the palette.
+  const hue = ((index - DISH_PALETTE.length) * 137.508 + 15) % 360;
+  const saturation = 56 + index % 3 * 6;
+  const lightness = 83 - Math.floor(index / 3) % 3 * 3;
+  return [`hsl(${hue.toFixed(3)} ${saturation}% ${lightness}%)`, `hsl(${hue.toFixed(3)} 40% 35%)`];
+}
 function resourceLabel(resource) { return display(resource?.name, isPerson(resource) ? "未命名厨师" : "未命名器具"); }
 function addMinutes(time, amount) {
   const value = minutes(time) + amount;
@@ -260,11 +278,11 @@ function taskCard(task, layout) {
   const top = Math.max(0, (minutes(task.start) - minutes(state.timelineStart)) / 60 * hourHeight);
   const height = (Math.min(minutes(task.end), minutes(state.timelineEnd)) - Math.max(minutes(task.start), minutes(state.timelineStart))) / 60 * hourHeight;
   const { column, count } = layout.get(task.id);
-  const index = dishIndex(task);
+  const [background] = dishColors(task);
   const warning = capacityConflicts.has(task.id) ? ` · 占用超限：${[...capacityConflicts.get(task.id)].join("、")}` : "";
   const name = display(task.name.trim(), display(task.dish.trim(), "未命名菜品"));
   const title = `${name} · ${display(task.dish, "未命名菜品")} ${task.start}–${task.end}${warning}`;
-  return `<article class="task-card ${warning ? "capacity-conflict" : ""} ${height < 48 ? "short" : ""} ${task.done ? "done" : ""}" data-id="${esc(task.id)}" title="${esc(title)}" style="top:${top}px;height:${height}px;left:calc(${column / count * 100}% + ${count > 1 ? 1 : 4}px);width:calc(${100 / count}% - ${count > 1 ? 2 : 8}px);background:${COLORS[index % COLORS.length]}"><span class="resize-handle top" data-edge="start" title="拖动调整开始时间"></span><button type="button" class="move-handle" data-edge="move" aria-label="拖动移动步骤">⠿</button><button type="button" class="check" aria-label="${task.done ? "标为待处理" : "标为完成"}">${task.done ? "✓" : ""}</button><strong>${esc(name)}</strong><small>${task.start}–${task.end} · ${esc(display(task.dish, "未命名菜品"))}${task.note ? ` · ${esc(task.note)}` : ""}${warning ? " · 占用超限" : ""}</small><span class="resize-handle bottom" data-edge="end" title="拖动调整结束时间"></span></article>`;
+  return `<article class="task-card ${warning ? "capacity-conflict" : ""} ${height < 48 ? "short" : ""} ${task.done ? "done" : ""}" data-id="${esc(task.id)}" title="${esc(title)}" style="top:${top}px;height:${height}px;left:calc(${column / count * 100}% + ${count > 1 ? 1 : 4}px);width:calc(${100 / count}% - ${count > 1 ? 2 : 8}px);background:${background}"><span class="resize-handle top" data-edge="start" title="拖动调整开始时间"></span><button type="button" class="move-handle" data-edge="move" aria-label="拖动移动步骤">⠿</button><button type="button" class="check" aria-label="${task.done ? "标为待处理" : "标为完成"}">${task.done ? "✓" : ""}</button><strong>${esc(name)}</strong><small>${task.start}–${task.end} · ${esc(display(task.dish, "未命名菜品"))}${task.note ? ` · ${esc(task.note)}` : ""}${warning ? " · 占用超限" : ""}</small><span class="resize-handle bottom" data-edge="end" title="拖动调整结束时间"></span></article>`;
 }
 // A predecessor must finish before this step starts. Tied latest finishes allow merges.
 // Include hidden tasks when choosing predecessors so filtering never invents shortcuts.
@@ -293,7 +311,7 @@ function renderConnections() {
       const arc = Math.abs(source.x - target.x) < 1 ? 16 : 0;
       const targetControl = completion ? y2 + bend : y2 - bend;
       const d = `M ${source.x} ${y1} C ${source.x + arc} ${y1 + bend}, ${target.x + arc} ${targetControl}, ${target.x} ${y2}`;
-      paths.push(`<path data-kind="${kind}" data-from-id="${esc(from.id)}" data-to-id="${esc(to.id)}" data-from-lane="${esc(source.lane)}" data-to-lane="${esc(target.lane)}" d="${d}" stroke="${DISH_STROKES[dishIndex(from) % DISH_STROKES.length]}"/>`);
+      paths.push(`<path data-kind="${kind}" data-from-id="${esc(from.id)}" data-to-id="${esc(to.id)}" data-from-lane="${esc(source.lane)}" data-to-lane="${esc(target.lane)}" d="${d}" stroke="${dishColors(from)[1]}"/>`);
     }
   };
   const resourceLanes = task => task.appliances.length ? task.appliances : ["unassigned"];

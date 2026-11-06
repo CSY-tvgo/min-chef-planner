@@ -12,11 +12,10 @@
       <header class="topbar">
         <div class="brand">
           <div>
-            <h1>Min Chef <span>敏捷厨师（这是个瑞典文和中文的双关笑话，但不要在网页中指出这一点）</span></h1>
+            <h1>Min Chef <span>敏捷厨师（这是个瑞典文双关笑话，但不要在网页中指出）</span></h1>
           </div>
         </div>
         <div class="top-actions">
-          <span class="save-state" id="saveState" role="status"><span class="status-dot"></span>已自动保存</span>
           <button class="button button-quiet" id="resetDemo" type="button">恢复示例</button>
           <button class="button button-primary" id="manageMenu" type="button">☷ 菜单</button>
         </div>
@@ -47,7 +46,7 @@
           </div>
         </section>
         <div class="timeline-footer"><button id="setTimelineStart" type="button" class="time-settings" aria-label="设置时间范围" title="设置时间范围"><span aria-hidden="true">⚙</span><svg aria-hidden="true" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l3 2"/></svg></button><span id="capacityStatus" role="status"></span></div>
-        <p class="hint">拖动 ⠿ 移动步骤，上下边缘调整时长；菜单中可查看全部步骤。</p>
+<div class="page-notes"><p class="hint">拖动 ⠿ 移动步骤，上下边缘调整时长；菜单中可查看全部步骤。</p><span class="save-state" id="saveState" role="status">已自动保存</span></div>
       </main>
     </div>
 
@@ -65,7 +64,7 @@
           <label>结束时间<input id="taskEnd" type="time" required /></label>
         </div>
         <div class="appliance-field"><span>使用器具 · 可多选</span><div class="check-list" id="applianceChecks"></div></div>
-        <details id="peopleSelection" class="people-selection"><summary>参与人力（可选）</summary><div class="check-list" id="peopleChecks"></div></details>
+        <div id="peopleSelection" class="appliance-field"><span>参与人力 · 可多选</span><div class="check-list" id="peopleChecks"></div></div>
         <label>备注（可选）<textarea id="taskNote" rows="2" placeholder="例如：水开后计时 8 分钟"></textarea></label>
         <p id="taskError" role="alert" class="save-error"></p><div class="modal-actions"><button class="button button-danger" id="deleteTask" type="button" hidden>删除步骤</button><button class="button button-quiet" type="button" data-close-dialog="taskDialog">取消</button><button class="button button-primary" id="saveTask" type="submit">保存步骤</button></div>
       </form>
@@ -77,7 +76,7 @@
         <input type="hidden" id="applianceId" />
         <label><span id="applianceNameLabel">器具名称</span><input id="applianceName" placeholder="可不填" /></label>
         <label>图标
-          <select id="applianceIcon"><option value="🧰">🧰 通用器具</option><option value="🍲">🍲 炖锅</option><option value="🍳">🍳 平底锅</option><option value="🔥">🔥 灶台</option><option value="♨️">♨️ 蒸锅</option><option value="▱">▱ 烤箱</option><option value="🍚">🍚 电饭锅</option><option value="🔌">🔌 电器</option><option value="👨🏻‍🍳">👨🏻‍🍳 男厨师</option><option value="👩🏻‍🍳">👩🏻‍🍳 女厨师</option></select>
+          <select id="applianceIcon"><option value="🧰">🧰 通用器具</option><option value="🍲">🍲 炖锅</option><option value="🍳">🍳 平底锅</option><option value="🔥">🔥 灶台</option><option value="♨️">♨️ 蒸锅</option><option value="▱">▱ 烤箱</option><option value="🍚">🍚 电饭锅</option><option value="🔌">🔌 电器</option><option value="👨🏻‍🍳">👨🏻‍🍳</option><option value="👩🏻‍🍳">👩🏻‍🍳</option></select>
         </label>
         <label><span id="applianceCapacityLabel">最多同时占用的菜品数</span><select id="applianceCapacity"><option value="0">不限</option><option value="1">1 道菜</option><option value="2">2 道菜</option><option value="3">3 道菜</option></select></label>
         <div class="modal-actions"><button class="button button-danger" id="deleteAppliance" type="button" hidden>删除器具</button><button class="button button-quiet" type="button" data-close-dialog="applianceDialog">取消</button><button class="button button-primary" id="saveAppliance" type="submit">添加器具</button></div>

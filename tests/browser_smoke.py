@@ -175,7 +175,7 @@ def test_appliance_capacity(browser, url, errors):
     assert page.locator('#setTimelineStart').get_attribute('aria-label') == '设置时间范围'
     assert page.locator('#setTimelineStart').bounding_box()['y'] >= page.locator('.planner-wrap').bounding_box()['y'] + page.locator('.planner-wrap').bounding_box()['height']
     assert page.locator('#setTimelineStart').bounding_box()['y'] + 32 <= page.evaluate('innerHeight')
-    assert page.locator('h1 span').inner_text() == '敏捷厨师（这是个瑞典文和中文的双关笑话，但不要在网页中指出这一点）'
+    assert page.locator('h1 span').inner_text() == '敏捷厨师（这是个瑞典文双关笑话，但不要在网页中指出）'
     assert '双关' in page.locator('body').inner_text()
     page.locator('.task-card .check').first.click()
     data = plan(page)
@@ -239,7 +239,6 @@ def test_people(browser, url, errors):
     page.locator('.task-card .check').first.click()
     open_step(page, 't1')
     assert page.locator('#peopleChecks input').count() == 0
-    page.locator('#peopleSelection summary').click()
     assert '添加' in page.locator('#peopleChecks').inner_text()
     page.locator('#saveTask').click()
     page.locator('#menuDialog [data-close-dialog]').click()
@@ -259,8 +258,7 @@ def test_people(browser, url, errors):
     open_step(page, 't1')
     assert page.locator('#applianceChecks input').count() == 4
     assert page.locator('#peopleChecks input').count() == 2
-    assert not page.locator('#peopleSelection').evaluate('(d) => d.open')
-    page.locator('#peopleSelection summary').click()
+    assert page.locator('#peopleSelection').is_visible()
     for person in people:
         page.locator(f'#peopleChecks input[value="{person}"]').check()
     page.locator('#saveTask').click()
@@ -269,7 +267,7 @@ def test_people(browser, url, errors):
     assert page.locator('[data-id="t1"]').count() == 3
     page.reload()
     open_step(page, 't1')
-    assert page.locator('#peopleSelection').evaluate('(d) => d.open')
+    assert page.locator('#peopleSelection').is_visible()
     assert page.locator('#peopleChecks input:checked').count() == 2
     assert page.locator('#applianceChecks input:checked').count() == 1
     page.locator(f'#peopleChecks input[value="{people[0]}"]').uncheck()
@@ -277,8 +275,7 @@ def test_people(browser, url, errors):
     assert set(plan(page)['tasks'][0]['appliances']) == {'stove', people[1]}
     # A step may use just people, with no kitchen tools selected.
     page.locator('#addDishTask').click()
-    assert not page.locator('#peopleSelection').evaluate('(d) => d.open')
-    page.locator('#peopleSelection summary').click()
+    assert page.locator('#peopleSelection').is_visible()
     page.locator(f'#peopleChecks input[value="{people[0]}"]').check()
     page.locator('#taskName').fill('切菜')
     page.locator('#saveTask').click()
@@ -315,6 +312,84 @@ def test_people(browser, url, errors):
     print('PASS: visible joke, refreshed icons, optional multi-person assignments, reload, people-only steps, resource conversion/deletion and legacy icons')
 
 
+def test_unassigned_and_links(browser, url, errors):
+    context = browser.new_context(viewport={'width': 1280, 'height': 1000})
+    page = context.new_page()
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    page.goto(url)
+    assert page.locator('.page-notes #saveState').count() == 1
+    assert page.locator('.top-actions #saveState').count() == 0
+    page.locator('.task-card .check').first.click()
+    data = plan(page)
+    data['appliances'][0]['name'] = ''
+    chef = { 'id': 'chef', 'name': '阿敏', 'icon': '👨🏻‍🍳', 'capacity': 0 }
+    data['appliances'].append(chef)
+    template = data['tasks'][0]
+    stages = [
+        ('a', '10:00', '10:20', ['stove'], False),
+        ('b', '10:30', '11:00', ['stove', 'oven', 'chef'], True),
+        ('c', '11:10', '11:30', ['rice'], False),
+        ('d', '11:10', '11:30', ['steamer'], False),
+        ('human', '11:40', '11:50', ['chef'], False),
+        ('e', '12:00', '12:30', [], False),
+        ('f', '12:30', '13:00', ['stove'], False),
+    ]
+    data['tasks'] = [{**template, 'id': id, 'name': id, 'start': start, 'end': end, 'appliances': tools, 'done': done} for id, start, end, tools, done in stages]
+    page.evaluate('([k,v]) => localStorage.setItem(k, JSON.stringify(v))', [KEY, data])
+    page.reload()
+    assert page.locator('.unassigned-head').inner_text().startswith('无器具')
+    assert page.locator('.lane[data-unassigned] .task-card').count() == 1
+    assert page.locator('.lane[data-unassigned] [data-id="e"]').count() == 1
+    assert page.locator('.lane[data-unassigned] [data-id="human"]').count() == 0
+    header = page.locator('[data-open-appliance="stove"]')
+    assert header.locator('strong, small').count() == 0
+    assert '未命名' not in header.inner_text()
+    assert header.locator('.tool-icon').evaluate('(e) => parseFloat(getComputedStyle(e).fontSize)') >= 25
+    assert header.get_attribute('aria-label')
+    paths = page.locator('.dish-connections path')
+    assert paths.count() == 9
+    assert page.locator('[data-from-id="a"][data-to-id="b"]').count() == 2
+    assert page.locator('[data-from-id="b"][data-to-id="c"]').count() == 2
+    assert page.locator('[data-from-id="b"][data-to-id="d"]').count() == 2
+    assert page.locator('[data-from-id="c"][data-to-id="e"]').count() == 1
+    assert page.locator('[data-from-id="d"][data-to-id="e"]').count() == 1
+    assert page.locator('[data-from-lane="chef"], [data-to-lane="chef"], [data-from-id="human"], [data-to-id="human"]').count() == 0
+    assert page.locator('.dish-connections').evaluate('(e) => getComputedStyle(e).pointerEvents') == 'none'
+    assert 'NaN' not in page.locator('.dish-connections').inner_html()
+    assert page.locator('[data-id="a"]').evaluate('(e) => e.style.background') == page.locator('[data-id="c"]').evaluate('(e) => e.style.background')
+    old_path = page.locator('[data-from-id="a"][data-to-id="b"]').first.get_attribute('d')
+    resize_column(page, 60)
+    assert page.locator('[data-from-id="a"][data-to-id="b"]').first.get_attribute('d') != old_path
+    old_path = page.locator('[data-from-id="a"][data-to-id="b"]').first.get_attribute('d')
+    drag(page, page.locator('.lane[data-resource-id="stove"] [data-id="b"] .move-handle'), scale(page)/12)
+    assert page.locator('[data-from-id="a"][data-to-id="b"]').first.get_attribute('d') != old_path
+    page.locator('[data-filter="todo"]').click()
+    assert page.locator('.dish-connections path').count() == 3
+    assert page.locator('[data-from-id="a"][data-to-id="c"]').count() == 0
+    page.locator('[data-filter="all"]').click()
+    set_range(page, '10:35', '12:20')
+    assert page.locator('.dish-connections path').count() == 6
+    page.reload()
+    assert page.locator('.dish-connections path').count() == 6
+    # Empty-resource cards remain editable and draggable through the overlay.
+    set_range(page, '10:00', '17:00')
+    drag(page, page.locator('.lane[data-unassigned] [data-id="e"] .move-handle'), scale(page)/12)
+    assert next(t for t in plan(page)['tasks'] if t['id'] == 'e')['start'] == '12:05'
+    page.locator('.lane[data-unassigned] [data-id="e"] strong').click()
+    assert page.locator('#applianceChecks input:checked, #peopleChecks input:checked').count() == 0
+    assert page.locator('#peopleSelection').is_visible()
+    assert page.locator('#peopleSelection summary').count() == 0
+    assert page.locator('#applianceChecks').is_visible()
+    page.locator('#taskDialog [data-close-dialog]').first.click()
+    # Geometry recomputes on a mobile-size resize, without page-wide overflow.
+    page.set_viewport_size({'width': 375, 'height': 812})
+    page.wait_for_function('document.documentElement.scrollWidth <= innerWidth')
+    assert 'NaN' not in page.locator('.dish-connections').inner_html()
+    assert not errors, errors
+    context.close()
+    print('PASS: unassigned lane, icon-only unnamed headers, visible people choices, branching/merging tool-only curves, filtering, resizing and dragging')
+
+
 def run():
     server = ThreadingHTTPServer(('127.0.0.1', 0), partial(QuietHandler, directory=str(ROOT)))
     Thread(target=server.serve_forever, daemon=True).start()
@@ -343,11 +418,11 @@ def run():
             assert max(widths) - min(widths) < 1
             assert abs(widths[0] - (wrap['width'] - 30)/4) < 1
             resize_column(page, 60)
-            assert abs(page.locator('.lane').first.bounding_box()['width'] - widths[0] - 60) < 1
-            assert abs(page.locator('.lane').nth(1).bounding_box()['width'] - widths[1]) < 1
-            resized_width = page.locator('.lane').first.bounding_box()['width']
+            assert abs(page.locator('.lane[data-resource-id]').first.bounding_box()['width'] - widths[0] - 60) < 1
+            assert abs(page.locator('.lane[data-resource-id]').nth(1).bounding_box()['width'] - widths[1]) < 1
+            resized_width = page.locator('.lane[data-resource-id]').first.bounding_box()['width']
             page.reload()
-            assert abs(page.locator('.lane').first.bounding_box()['width'] - resized_width) < 1
+            assert abs(page.locator('.lane[data-resource-id]').first.bounding_box()['width'] - resized_width) < 1
             set_range(page, '10:15', '12:10')
             assert page.locator('.time-label').first.inner_text() == '11'
             body = page.locator('.timeline-body').bounding_box()
@@ -357,7 +432,7 @@ def run():
             assert page.locator('[data-id="t8"]').count() == 1
             set_range(page, '10:00', '22:00')
             # Simultaneous tasks remain individually visible and clickable.
-            cards = page.locator('.lane').first.locator('.task-card[data-id="t6"], .task-card[data-id="t7"]')
+            cards = page.locator('.lane[data-resource-id]').first.locator('.task-card[data-id="t6"], .task-card[data-id="t7"]')
             a, b = [cards.nth(i).bounding_box() for i in range(2)]
             assert a['x'] + a['width'] <= b['x'] or b['x'] + b['width'] <= a['x']
             # Blank names and multiple appliances, edit, completion and persistence.
@@ -476,13 +551,14 @@ def run():
             assert abs(after[0] - before[0] - 20) < 1
             assert abs(after[1] - before[1]) < 1
             mobile.reload()
-            assert abs(mobile.locator('.lane').first.bounding_box()['width'] - after[0]) < 1
+            assert abs(mobile.locator('.lane[data-resource-id]').first.bounding_box()['width'] - after[0]) < 1
             assert mobile.evaluate('document.documentElement.scrollWidth <= innerWidth')
             assert not errors, errors
             context.close()
             test_menu(browser, url, errors)
             test_appliance_capacity(browser, url, errors)
             test_people(browser, url, errors)
+            test_unassigned_and_links(browser, url, errors)
             browser.close()
             print('PASS: mobile layout and real touch resizing; no JavaScript errors')
     finally:

@@ -159,3 +159,17 @@ button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .people-selection summary { cursor: pointer; padding: 8px 0; }
 .people-selection summary:focus-visible { outline: 2px solid var(--green); }
 .people-selection .check-item { color: var(--ink); }
+/* Unassigned steps and dish links share the timeline but never intercept input. */
+.unassigned-head { flex: 0 0 var(--lane); height: 64px; padding: 26px 6px 4px; border-right: 1px solid var(--line); }
+.unassigned-head strong { display: block; font-size: 11px; }
+.unassigned-head small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; }
+.appliance-open.icon-only { display: grid; place-items: center; padding: 0; }
+.appliance-open.icon-only .tool-icon { position: static; width: 38px; height: 38px; font-size: 27px; background: transparent; }
+.lanes { position: relative; }
+.task-card { z-index: 1; }
+.dish-connections { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: hidden; }
+.dish-connections path { fill: none; stroke-width: 2.5; stroke-opacity: .18; stroke-linecap: round; }
+.now-line { z-index: 2; }
+.page-notes { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-top: 10px; }
+.page-notes .hint { flex: 1; min-width: 230px; margin: 0; }
+.page-notes .save-state { white-space: nowrap; font-size: 10px; }

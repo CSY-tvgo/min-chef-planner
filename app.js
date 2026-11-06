@@ -44,7 +44,7 @@ function taskCard(task) {
   const height = Math.max(54, (minutes(task.end) - minutes(task.start)) / 60 * 88 - 5);
   const index = state.tasks.findIndex(t => t.id === task.id);
   const conflict = task.appliances.some(a => state.tasks.some(other => other.id !== task.id && other.appliances.includes(a) && minutes(other.start) < minutes(task.end) && minutes(other.end) > minutes(task.start)));
-  return `<article class="task-card ${task.done ? "done" : ""} ${conflict ? "conflict" : ""}" data-id="${task.id}" style="top:${top}px;height:${height}px;background:${COLORS[index % COLORS.length]}"><span class="check">${task.done ? "✓" : ""}</span><span class="task-time">${task.start} — ${task.end}</span><strong>${esc(task.name)}</strong><small>${esc(task.dish)}${task.note ? ` · ${esc(task.note)}` : ""}</small></article>`;
+  return `<article class="task-card ${task.done ? "done" : ""} ${conflict ? "conflict" : ""}" data-id="${task.id}" style="top:${top}px;height:${height}px;background:${COLORS[index % COLORS.length]}"><span class="check">${task.done ? "✓" : ""}</span><strong>${esc(task.name)}</strong><small>${esc(task.dish)}${task.note ? ` · ${esc(task.note)}` : ""}</small></article>`;
 }
 function openTask(id = "") {
   const task = state.tasks.find(t => t.id === id);

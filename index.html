@@ -39,6 +39,7 @@
           </div>
           <div class="toolbar-group">
             <button class="button button-outline" id="addAppliance" type="button">＋ 器具</button>
+            <button class="button button-outline" id="setTimelineStart" type="button">起始时间</button>
             <button class="button button-outline" id="manageMenu" type="button">☷ 菜单</button>
           </div>
         </section>
@@ -67,8 +68,8 @@
           <button class="icon-button" type="button" data-close-dialog="taskDialog" aria-label="关闭">×</button>
         </div>
         <input type="hidden" id="taskId" />
-        <label>步骤名称<input id="taskName" required placeholder="例如：清蒸鲈鱼" /></label>
-        <label>所属菜品<input id="taskDish" required placeholder="例如：主菜" /></label>
+        <label>步骤名称<input id="taskName" placeholder="可不填" /></label>
+        <label>所属菜品<input id="taskDish" placeholder="可不填" /></label>
         <div class="form-grid">
           <label>开始时间<input id="taskStart" type="time" required /></label>
           <label>结束时间<input id="taskEnd" type="time" required /></label>
@@ -82,11 +83,18 @@
     <dialog id="applianceDialog" class="modal">
       <form id="applianceForm">
         <div class="modal-head"><div><p class="eyebrow accent">KITCHEN TOOL</p><h3>添加器具</h3></div><button class="icon-button" type="button" data-close-dialog="applianceDialog" aria-label="关闭">×</button></div>
-        <label>器具名称<input id="applianceName" required placeholder="例如：空气炸锅" /></label>
+        <label>器具名称<input id="applianceName" placeholder="可不填" /></label>
         <label>图标
-          <select id="applianceIcon"><option value="◉">◉ 设备</option><option value="♨">♨ 加热</option><option value="▱">▱ 烤箱</option><option value="◌">◌ 电器</option><option value="⌁">⌁ 手工</option></select>
+          <select id="applianceIcon"><option value="◉">◉ 设备</option><option value="🍲">🍲 锅</option><option value="♨">♨ 加热</option><option value="▱">▱ 烤箱</option><option value="◌">◌ 电器</option><option value="⌁">⌁ 手工</option></select>
         </label>
         <div class="modal-actions"><button class="button button-quiet" type="button" data-close-dialog="applianceDialog">取消</button><button class="button button-primary" type="submit">添加器具</button></div>
+      </form>
+    </dialog>
+    <dialog id="timelineDialog" class="modal">
+      <form id="timelineForm">
+        <div class="modal-head"><div><p class="eyebrow accent">时间轴</p><h3>设置起始时间</h3></div><button class="icon-button" type="button" data-close-dialog="timelineDialog" aria-label="关闭">×</button></div>
+        <label>起始时间<input id="timelineStart" type="time" required /></label>
+        <div class="modal-actions"><button class="button button-quiet" type="button" data-close-dialog="timelineDialog">取消</button><button class="button button-primary" type="submit">保存</button></div>
       </form>
     </dialog>
 

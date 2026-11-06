@@ -161,7 +161,11 @@ function findCapacityConflicts() {
 }
 function sizeTimeline() {
   const wrap = document.querySelector(".planner-wrap");
-  const height = Math.max(280, window.innerHeight - (wrap.getBoundingClientRect().top + window.scrollY) - 60);
+  const footer = document.querySelector(".timeline-footer");
+  const notes = document.querySelector(".page-notes");
+  const bottomSpace = footer.getBoundingClientRect().height + notes.getBoundingClientRect().height
+    + parseFloat(getComputedStyle(notes).marginTop) + parseFloat(getComputedStyle(document.querySelector(".app-shell")).paddingBottom);
+  const height = Math.max(180, window.innerHeight - (wrap.getBoundingClientRect().top + window.scrollY) - bottomSpace - 2);
   wrap.style.height = `${height}px`;
   hourHeight = (height - 64) / (state.visibleHours || 2.5);
   $("planner").style.setProperty("--hour", `${hourHeight}px`);
@@ -169,6 +173,9 @@ function sizeTimeline() {
 function render() {
   const start = minutes(state.timelineStart);
   capacityConflicts = findCapacityConflicts();
+  $("capacityStatus").textContent = capacityConflicts.size ? `${capacityConflicts.size} 个步骤超出器具或人力容量` : "";
+  $("saveState").textContent = storageWarning || SAVE_MESSAGE;
+  $("saveState").classList.toggle("save-error", Boolean(storageWarning));
   const peopleCount = state.appliances.filter(isPerson).length;
   $("summary").innerHTML = `<div class="stat"><strong>${state.dishes.length}</strong><span>道菜品</span></div><div class="stat"><strong>${state.appliances.length - peopleCount}</strong><span>件器具</span></div>${peopleCount ? `<div class="stat"><strong>${peopleCount}</strong><span>位厨师</span></div>` : ""}<div class="stat"><strong>${state.tasks.filter(t => t.done).length}/${state.tasks.length}</strong><span>步骤完成</span></div>`;
   sizeTimeline();
@@ -193,7 +200,6 @@ function render() {
   $("lanes").innerHTML = `<div class="lane" data-unassigned style="flex-basis:${defaultWidth}px">${unassigned.map(t => taskCard(t, unassignedLayout)).join("")}</div>` + state.appliances.map((a, i) => `<div class="lane" data-resource-id="${esc(a.id)}" data-person="${isPerson(a)}" style="flex-basis:${widths[i]}px">${visible.filter(t => t.appliances.includes(a.id)).map(t => taskCard(t, layouts[i])).join("")}</div>`).join("");
   renderConnections();
   renderMenu();
-  $("capacityStatus").textContent = capacityConflicts.size ? `${capacityConflicts.size} 个步骤超出器具或人力容量` : "";
   document.querySelectorAll("[data-open-appliance]").forEach(b => b.onclick = () => openAppliance(b.dataset.openAppliance));
   document.querySelectorAll(".task-card").forEach(card => {
     card.onclick = (event) => { if (!event.target.closest(".resize-handle, .move-handle")) openTask(card.dataset.id); };
@@ -204,8 +210,6 @@ function render() {
     };
     card.querySelectorAll(".resize-handle, .move-handle").forEach(handle => handle.addEventListener("pointerdown", startResize));
   });
-  $("saveState").textContent = storageWarning || SAVE_MESSAGE;
-  $("saveState").classList.toggle("save-error", Boolean(storageWarning));
   document.querySelectorAll("[data-resize-appliance]").forEach(handle => {
     handle.addEventListener("pointerdown", startColumnResize);
     handle.addEventListener("keydown", e => {
@@ -256,19 +260,33 @@ function renderConnections() {
   });
   const people = new Set(state.appliances.filter(isPerson).map(a => a.id));
   const paths = [];
+  const addConnection = (from, to, kind) => {
+    const completion = kind === "completion";
+    // A clipped bottom is not the actual finish of the step.
+    if (completion && (minutes(from.end) > minutes(state.timelineEnd) || minutes(to.end) > minutes(state.timelineEnd))) return;
+    for (const source of nodes.get(from.id) || []) for (const target of nodes.get(to.id) || []) {
+      if (completion && source.lane === target.lane) continue;
+      const y1 = source.bottom, y2 = completion ? target.bottom : target.top;
+      const bend = Math.max(24, Math.abs(y2 - y1) * .45);
+      const arc = Math.abs(source.x - target.x) < 1 ? 16 : 0;
+      const targetControl = completion ? y2 + bend : y2 - bend;
+      const d = `M ${source.x} ${y1} C ${source.x + arc} ${y1 + bend}, ${target.x + arc} ${targetControl}, ${target.x} ${y2}`;
+      paths.push(`<path data-kind="${kind}" data-from-id="${esc(from.id)}" data-to-id="${esc(to.id)}" data-from-lane="${esc(source.lane)}" data-to-lane="${esc(target.lane)}" d="${d}" stroke="${DISH_STROKES[dishIndex(from) % DISH_STROKES.length]}"/>`);
+    }
+  };
+  const contains = (outer, inner) => outer.id !== inner.id && minutes(outer.start) <= minutes(inner.start) && minutes(outer.end) >= minutes(inner.end)
+    && (outer.start !== inner.start || outer.end !== inner.end);
   for (const dish of state.dishes) {
     const tasks = state.tasks.filter(t => t.dishId === dish.id && (t.appliances.length === 0 || t.appliances.some(id => !people.has(id)))).sort((a, b) => minutes(a.start) - minutes(b.start));
     for (const to of tasks) {
       const candidates = tasks.filter(from => from.id !== to.id && minutes(from.end) <= minutes(to.start));
       const latestEnd = Math.max(-1, ...candidates.map(from => minutes(from.end)));
-      for (const from of candidates.filter(from => minutes(from.end) === latestEnd)) {
-        for (const source of nodes.get(from.id) || []) for (const target of nodes.get(to.id) || []) {
-          const y1 = source.bottom, y2 = target.top;
-          const bend = Math.max(24, Math.abs(y2 - y1) * .45);
-          const arc = Math.abs(source.x - target.x) < 1 ? 16 : 0;
-          const d = `M ${source.x} ${y1} C ${source.x + arc} ${y1 + bend}, ${target.x + arc} ${y2 - bend}, ${target.x} ${y2}`;
-          paths.push(`<path data-from-id="${esc(from.id)}" data-to-id="${esc(to.id)}" data-from-lane="${esc(source.lane)}" data-to-lane="${esc(target.lane)}" d="${d}" stroke="${DISH_STROKES[dishIndex(from) % DISH_STROKES.length]}"/>`);
-        }
+      for (const from of candidates.filter(from => minutes(from.end) === latestEnd)) addConnection(from, to, "sequence");
+      // A contained activity finishes into its immediate containing resource interval.
+      // Strict containment prevents cycles; equally timed parallel steps are not containers.
+      const containers = tasks.filter(outer => contains(outer, to));
+      for (const outer of containers.filter(outer => !containers.some(other => contains(outer, other)))) {
+        addConnection(to, outer, "completion");
       }
     }
   }

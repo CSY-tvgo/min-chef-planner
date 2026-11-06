@@ -697,6 +697,83 @@ def test_mobile_compatibility(browser, url, errors):
     print('PASS: cached old assets, missing compression/clipboard APIs, whole-header mobile drag/tap, persisted settings, real touch step and visible storage errors')
 
 
+def test_completion_links_and_compact_layout(browser, url, errors):
+    context = browser.new_context(viewport={'width': 1200, 'height': 900})
+    page = context.new_page()
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    page.goto(url); page.locator('.task-card .check').first.click()
+    data = plan(page)
+    template = data['tasks'][0]
+    data['timelineStart'], data['timelineEnd'] = '16:00', '19:00'
+    data['appliances'] = sorted(data['appliances'], key=lambda a: ['stove','steamer','oven','rice'].index(a['id']))
+    names = {'stove':'腌制碗','steamer':'烤盘','oven':'烤箱','rice':'上菜盘'}
+    for a in data['appliances']:
+        a['width'] = 150
+        a['name'] = names[a['id']]
+    data['tasks'] = [{**template, 'id': id, 'name': name, 'start': start, 'end': end, 'appliances': [tool], 'done': False} for id, name, start, end, tool in [
+        ('prep','腌制排骨','16:20','16:50','stove'),
+        ('tray','放在烤盘里','17:06','18:06','steamer'),
+        ('roast','烤制排骨','17:13','17:56','oven'),
+        ('serve','上菜','18:06','18:45','rice')]]
+    page.evaluate('([k,v]) => localStorage.setItem(k, JSON.stringify(v))', [KEY, data]); page.reload()
+    path = page.locator('path[data-kind="completion"][data-from-id="roast"][data-to-id="tray"]')
+    assert path.count() == 1
+    assert page.locator('path[data-kind="sequence"][data-from-id="prep"][data-to-id="roast"]').count() == 1
+    assert page.locator('path[data-kind="sequence"][data-from-id="tray"][data-to-id="roast"]').count() == 0
+    assert page.locator('path[data-kind="sequence"][data-from-id="tray"][data-to-id="serve"]').count() == 1
+    endpoints = path.evaluate('(p) => { const a=p.getPointAtLength(0), b=p.getPointAtLength(p.getTotalLength()); return [a.y,b.y]; }')
+    top = page.locator('#lanes').bounding_box()['y']
+    for y, id in zip(endpoints, ['roast','tray']):
+        box = page.locator(f'.task-card[data-id="{id}"]').bounding_box()
+        assert abs(y - (box['y'] + box['height'] - top)) < .1
+    # A clipped parent end is not a real end and must not get an artificial join.
+    set_range(page, '16:00', '18:00')
+    assert path.count() == 0
+    set_range(page, '16:00', '19:00')
+    assert path.count() == 1
+    page.screenshot(path='/tmp/minchef-completion-desktop.png')
+    # Nested intervals only join to their immediate parent; filtering cannot skip it.
+    data = plan(page)
+    data['tasks'].append({**data['tasks'][0], 'id':'nested', 'name':'检查熟度', 'start':'17:20','end':'17:40','appliances':['rice']})
+    data['tasks'].append({**data['tasks'][0], 'id':'other','dishId':data['dishes'][1]['id'],'dish':data['dishes'][1]['name'],'start':'16:00','end':'19:00','appliances':['stove']})
+    page.evaluate('([k,v]) => localStorage.setItem(k, JSON.stringify(v))', [KEY, data]); page.reload()
+    assert page.locator('path[data-kind="completion"][data-from-id="nested"][data-to-id="roast"]').count() == 1
+    assert page.locator('path[data-kind="completion"][data-from-id="nested"][data-to-id="tray"]').count() == 0
+    assert page.locator('path[data-kind="completion"][data-to-id="other"]').count() == 0
+    data['tasks'][2]['done'] = True
+    page.evaluate('([k,v]) => localStorage.setItem(k, JSON.stringify(v))', [KEY, data]); page.reload()
+    page.locator('[data-filter="todo"]').click()
+    assert page.locator('path[data-kind="completion"][data-from-id="nested"]').count() == 0
+    assert not errors, errors
+    context.close()
+    context = browser.new_context(viewport={'width':375,'height':812}, is_mobile=True, has_touch=True)
+    page = context.new_page()
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    page.goto(url); page.locator('.task-card .check').first.tap()
+    data = plan(page)
+    data['appliances'].append({'id':'chef','name':'小敏','icon':'👩🏻‍🍳','capacity':1})
+    page.evaluate('([k,v]) => localStorage.setItem(k, JSON.stringify(v))', [KEY, data]); page.reload()
+    for width, height in [(375,812),(360,640),(320,568)]:
+        page.set_viewport_size({'width':width,'height':height})
+        page.wait_for_function('document.documentElement.scrollHeight <= innerHeight + 2 && document.documentElement.scrollWidth <= innerWidth')
+        assert page.locator('.summary').bounding_box()['height'] <= 27
+        assert page.locator('.summary .stat').count() == 4
+        assert page.locator('.summary strong').first.evaluate('(e)=>parseFloat(getComputedStyle(e).fontSize)') <= 17
+        assert page.locator('.page-notes').bounding_box()['y'] + page.locator('.page-notes').bounding_box()['height'] <= height
+        assert page.locator('.planner-wrap').bounding_box()['height'] >= 180
+    page.set_viewport_size({'width':375,'height':812})
+    page.wait_for_function('innerWidth===375 && document.documentElement.scrollHeight<=innerHeight+2')
+    page.screenshot(path='/tmp/minchef-compact-mobile.png')
+    # Error notices are also included in the first-screen layout budget.
+    page.evaluate('() => { Storage.prototype.setItem = () => { throw new Error("Quota"); }; }')
+    page.locator('.task-card .check').first.tap()
+    assert '保存失败' in page.locator('#saveState').inner_text()
+    assert page.evaluate('document.documentElement.scrollHeight <= innerHeight + 2')
+    assert not errors, errors
+    context.close()
+    print('PASS: screenshot bottom-to-bottom join, nested parents, clipping/filtering, compact four-stat overview and full portrait first screen including errors')
+
+
 def run():
     server = ThreadingHTTPServer(('127.0.0.1', 0), partial(QuietHandler, directory=str(ROOT)))
     Thread(target=server.serve_forever, daemon=True).start()
@@ -869,6 +946,7 @@ def run():
             test_sequence_and_settings(browser, url, errors)
             test_transfer(browser, url, errors)
             test_mobile_compatibility(browser, url, errors)
+            test_completion_links_and_compact_layout(browser, url, errors)
             browser.close()
             print('PASS: mobile layout and real touch resizing; no JavaScript errors')
     finally:

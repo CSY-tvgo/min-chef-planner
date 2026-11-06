@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f6f7f2" />
     <title>Min Chef（敏捷厨师）</title>
-    <link rel="stylesheet" href="styles.css?v=a1477185ab47" />
+    <link rel="stylesheet" href="styles.css?v=9db5043308f4" />
   </head>
   <body>
     <div class="app-shell">
       <header class="topbar">
         <div class="brand">
           <div>
-            <h1>Min Chef <span>敏捷厨师（这是个瑞典文双关笑话，但不要在网页中指出）</span></h1>
+            <h1>Min Chef <span>敏捷厨师（不是瑞典语的“我的老板”）</span></h1>
           </div>
         </div>
         <div class="top-actions">
@@ -41,7 +41,7 @@
             <div class="timeline-body">
               <div class="time-axis" id="timeAxis"></div>
               <div class="lanes" id="lanes"></div>
-              <div class="now-line" id="nowLine"><span>NOW</span></div>
+              <div class="now-line" id="nowLine" aria-label="当前时间"><span>now</span></div>
             </div>
           </div>
         </section>
@@ -58,10 +58,12 @@
         <input type="hidden" id="taskId" />
         <label>步骤名称<input id="taskName" placeholder="可不填" /></label>
         <label>所属菜品<select id="taskDish"></select></label><label id="newDishLabel">新菜品名称<input id="taskNewDish" placeholder="可不填" /></label>
-        <div class="form-grid">
+        <label>时间方式<select id="taskTimingMode"><option value="fixed">固定时间</option><option value="duration">所需时间</option></select></label>
+        <div class="form-grid" id="fixedTimeFields">
           <label>开始时间<input id="taskStart" type="time" required /></label>
           <label>结束时间<input id="taskEnd" type="time" required /></label>
         </div>
+        <div id="durationFields" hidden><label>所需时间（分钟）<input id="taskDuration" type="number" min="1" max="1439" step="1" value="30" disabled /></label><p class="empty-state">保存后可自动排程，安排在本菜已排步骤之后。</p></div>
         <div class="appliance-field"><span>使用器具 · 可多选</span><div class="check-list" id="applianceChecks"></div></div>
         <div id="peopleSelection" class="appliance-field"><span>参与人力 · 可多选</span><div class="check-list" id="peopleChecks"></div></div>
         <label>备注（可选）<textarea id="taskNote" rows="2" placeholder="例如：水开后计时 8 分钟"></textarea></label>
@@ -120,7 +122,15 @@
       </ul>
       <p id="saveState" role="status">排程会自动保存在当前浏览器的缓存中。</p>
     </dialog>
+    <dialog id="scheduleDialog" class="modal">
+      <div class="modal-head"><h3>是否需要自动分配时间？</h3><button class="icon-button" type="button" data-close-dialog="scheduleDialog" aria-label="关闭">×</button></div>
+      <p id="scheduleIntro" class="empty-state"></p>
+      <p id="scheduleResult" hidden></p>
+      <div id="optimizationPreview" hidden><p>也可提前其他菜品的以下步骤：</p><ul id="optimizationChanges"></ul><p id="optimizedResult"></p></div>
+      <p id="scheduleStatus" role="status" class="save-error"></p>
+      <div class="modal-actions"><button id="skipSchedule" class="button button-quiet" type="button" data-close-dialog="scheduleDialog">暂不分配</button><button id="findSchedule" class="button button-outline" type="button">查找可用时间</button><button id="applySchedule" class="button button-primary" type="button" hidden>应用该时间</button><button id="applyOptimized" class="button button-outline" type="button" hidden>确认调整并应用</button></div>
+    </dialog>
     <script src="vendor/fflate-0.8.2.min.js?v=c3b34f2e9f5e"></script>
-    <script src="app.js?v=754bc8aeeeab"></script>
+    <script src="app.js?v=419c026d09c6"></script>
   </body>
 </html>

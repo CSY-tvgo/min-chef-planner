@@ -175,8 +175,8 @@ def test_appliance_capacity(browser, url, errors):
     assert page.locator('#setTimelineStart').get_attribute('aria-label') == '设置时间范围'
     assert page.locator('#setTimelineStart').bounding_box()['y'] >= page.locator('.planner-wrap').bounding_box()['y'] + page.locator('.planner-wrap').bounding_box()['height']
     assert page.locator('#setTimelineStart').bounding_box()['y'] + 32 <= page.evaluate('innerHeight')
-    assert page.locator('h1 span').inner_text() == '敏捷厨师（这是个瑞典文双关笑话，但不要在网页中指出）'
-    assert '双关' in page.locator('body').inner_text()
+    assert page.locator('h1 span').inner_text() == '敏捷厨师（不是瑞典语的“我的老板”）'
+    assert '我的老板' in page.locator('body').inner_text()
     page.locator('.task-card .check').first.click()
     data = plan(page)
     # Old steamer/stove symbols must migrate once, without swapping again on reload.
@@ -463,7 +463,7 @@ def test_sequence_and_settings(browser, url, errors):
     assert plan(page)['appliances'] == after['appliances']
     page.locator('.column-move').first.focus(); page.keyboard.press('ArrowRight')
     assert [a['id'] for a in plan(page)['appliances']][:2] == [a['id'] for a in before['appliances']][:2]
-    assert page.locator('.unassigned-head').count() == 1
+    assert page.locator('.unassigned-head').count() == 0
     assert not errors, errors
     context.close()
     # Real mobile touch reorders columns without opening their settings.
@@ -513,7 +513,7 @@ def semantic_plan(data):
         'unassigned_width': data.get('unassignedWidth', 0),
         'resources': [[a['name'], a['icon'], a.get('width', 0), a.get('capacity', 0)] for a in data['appliances']],
         'dishes': [d['name'] for d in data['dishes']],
-        'tasks': [[t['name'], dishes[t['dishId']], t['start'], t['end'], [resources[id] for id in t['appliances']], t['note'], t['done']] for t in data['tasks']]
+        'tasks': [[t['name'], dishes[t['dishId']], t['start'], t['end'], [resources[id] for id in t['appliances']], t['note'], t['done'], t.get('timingMode', 'fixed'), t.get('duration', 0) if t.get('timingMode') == 'duration' else 0, t.get('scheduled', True)] for t in data['tasks']]
     }
 
 
@@ -592,6 +592,7 @@ def test_transfer(browser, url, errors):
     # Previously exported version-1 texts still load with default unassigned width.
     old_payload = json.loads(gzip.decompress(base64.urlsafe_b64decode(token[4:]+'='*((4-len(token[4:])%4)%4))))
     old_payload[0] = 1
+    old_payload[7] = [task[:7] for task in old_payload[7]]
     old_payload = old_payload[:8]
     legacy_token = 'MC1.' + base64.urlsafe_b64encode(gzip.compress(json.dumps(old_payload).encode())).decode().rstrip('=')
     dest.locator('#manageMenu').click(); dest.locator('#openTransfer').click()
@@ -787,11 +788,20 @@ def test_completion_links_and_compact_layout(browser, url, errors):
     print('PASS: screenshot bottom-to-bottom join, nested parents, clipping/filtering, compact four-stat overview and full portrait first screen including errors')
 
 
+def seed_unassigned(page):
+    page.locator('.task-card .check').first.click()
+    data = plan(page)
+    data['tasks'].append({**data['tasks'][0], 'id':'unassigned-fixture', 'name':'备料', 'start':'10:00', 'end':'10:15', 'appliances':[], 'done':False})
+    page.evaluate('([k,v]) => localStorage.setItem(k,JSON.stringify(v))',[KEY,data])
+    page.reload()
+
+
 def test_unassigned_width_and_help(browser, url, errors):
     context = browser.new_context(viewport={'width':1280,'height':1000})
     page = context.new_page()
     page.on('pageerror', lambda e: errors.append(str(e)))
     page.goto(url)
+    seed_unassigned(page)
     assert page.locator('.unassigned-head [data-move-appliance], .unassigned-head .appliance-open').count()==0
     original_width = page.locator('.unassigned-head').bounding_box()['width']
     resource_widths = page.locator('.appliance-head').evaluate_all('(els)=>els.map(e=>e.getBoundingClientRect().width)')
@@ -822,6 +832,7 @@ def test_unassigned_width_and_help(browser, url, errors):
     context=browser.new_context(viewport={'width':375,'height':812},is_mobile=True,has_touch=True)
     page=context.new_page();page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto(url)
+    seed_unassigned(page)
     session=context.new_cdp_session(page)
     def touch_resize(delta, cancel=False):
         box=page.locator('[data-resize-unassigned]').bounding_box()
@@ -864,6 +875,173 @@ def test_unassigned_width_and_help(browser, url, errors):
     assert not errors,errors
     context.close()
     print('PASS: fixed unassigned column width via mouse/touch/keyboard, cancellation, persistence, help-only instructions and visible save errors')
+
+
+def test_duration_scheduling(browser, url, errors):
+    import copy
+    context = browser.new_context(viewport={'width':375,'height':812},is_mobile=True,has_touch=True)
+    page = context.new_page(); page.set_default_timeout(6000)
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    page.goto(url); page.locator('.task-card .check').first.tap()
+    base = plan(page)
+    base['timelineStart'],base['timelineEnd']='10:00','12:00'
+    base['appliances']=[a for a in base['appliances'] if a['id'] in ['oven','stove']]
+    for a in base['appliances']: a['capacity']=1
+    base['appliances'].append({'id':'chef','name':'小敏','icon':'👩🏻‍🍳','capacity':1})
+    template = base['tasks'][0]
+    def task(id,dish,start,end,resources,flex=False,done=False,pending=False):
+        mins=lambda t:int(t[:2])*60+int(t[3:])
+        result={**template,'id':id,'name':id,'dishId':base['dishes'][dish]['id'],'dish':base['dishes'][dish]['name'],'start':start,'end':end,'appliances':resources,'done':done,'timingMode':'duration' if flex else 'fixed','scheduled':not pending}
+        if flex: result['duration']=mins(end)-mins(start)
+        return result
+    def seed(tasks,capacity=1,end='12:00'):
+        data=copy.deepcopy(base); data['tasks']=tasks; data['timelineEnd']=end
+        next(a for a in data['appliances'] if a['id']=='oven')['capacity']=capacity
+        page.evaluate('([k,v])=>localStorage.setItem(k,JSON.stringify(v))',[KEY,data]);page.reload()
+    def add_duration(duration,resources,dish=2):
+        page.locator('#manageMenu').tap();page.locator(f'[data-open-dish="{base['dishes'][dish]['id']}"]').tap();page.locator('#addDishTask').tap()
+        page.locator('#taskStart').fill('') # Hidden fixed-time validation must not block duration mode.
+        page.locator('#taskTimingMode').select_option('duration')
+        page.locator('#taskDuration').fill(str(duration));page.locator('#taskName').fill('新增步骤')
+        for id in resources: page.locator(f'#applianceChecks input[value="{id}"],#peopleChecks input[value="{id}"]').check()
+        page.locator('#saveTask').tap()
+        assert page.locator('#scheduleDialog').evaluate('(d)=>d.open')
+        added=plan(page)['tasks'][-1]
+        assert added['scheduled'] is False and added['duration']==duration and added['timingMode']=='duration'
+        assert page.locator(f'.task-card[data-id="{added['id']}"]').count()==0
+        return added['id']
+    def search():
+        before=plan(page)
+        page.locator('#findSchedule').tap()
+        assert plan(page)==before # Searching never applies a proposal.
+    def reopen(id):
+        page.locator(f'[data-schedule-task="{id}"]').tap()
+    seed([task('oven-fixed',0,'10:00','10:30',['oven']),task('stove-fixed',1,'10:00','10:20',['stove'])])
+    id=add_duration(15,['oven','stove'])
+    page.locator('#scheduleDialog [data-close-dialog]').first.tap()
+    assert '待排程' in page.locator(f'[data-edit-task="{id}"]').inner_text()
+    assert page.locator(f'[data-toggle-step="{id}"]').is_disabled()
+    reopen(id);search()
+    assert '10:30–10:45' in page.locator('#scheduleResult').inner_text()
+    page.locator('#applySchedule').tap()
+    assert next(t for t in plan(page)['tasks'] if t['id']==id)['start']=='10:30'
+    assert next(t for t in plan(page)['tasks'] if t['id']==id)['scheduled']
+    page.reload();assert next(t for t in plan(page)['tasks'] if t['id']==id)['duration']==15
+    assert page.locator('.capacity-conflict').count()==0
+    # Resizing a scheduled duration step keeps its persisted duration consistent.
+    drag(page,page.locator(f'[data-id="{id}"] .resize-handle.bottom').first,scale(page)/12)
+    resized=next(t for t in plan(page)['tasks'] if t['id']==id)
+    assert resized['end']=='10:50' and resized['duration']==20
+    page.reload();assert next(t for t in plan(page)['tasks'] if t['id']==id)==resized
+    open_step(page,id);page.locator('#taskNote').fill('只改备注');page.locator('#saveTask').tap()
+    assert not page.locator('#scheduleDialog').evaluate('(d)=>d.open')
+    assert next(t for t in plan(page)['tasks'] if t['id']==id)=={**resized,'note':'只改备注'}
+    # Capacity 2 allows a second dish, unlimited allows parallel use, and people also reserve capacity.
+    for cap,resources,expected in [(2,['oven'],'10:00–10:15'),(0,['oven'],'10:00–10:15'),(2,['oven','chef'],'10:40–10:55')]:
+        seed([task('oven-fixed',0,'10:00','11:00',['oven']),task('chef-fixed',1,'10:00','10:40',['chef'])],cap)
+        add_duration(15,resources);search();assert expected in page.locator('#scheduleResult').inner_text()
+        page.locator('#applySchedule').tap();assert page.locator('.capacity-conflict').count()==0
+    # The new step follows this dish's existing steps, even on an unlimited tool.
+    seed([task('own-prep',0,'10:00','10:30',['oven'])],0)
+    add_duration(15,['oven'],dish=0);search();assert '10:30–10:45' in page.locator('#scheduleResult').inner_text()
+    # Fragmented free time cannot satisfy a continuous duration, and no fixed step is moved.
+    seed([task('middle-block',0,'10:10','10:20',['oven'])],end='10:30')
+    id=add_duration(15,['oven']);search()
+    assert '没有可用空档' in page.locator('#scheduleStatus').inner_text()
+    assert page.locator('#applySchedule').is_hidden() and page.locator('#applyOptimized').is_hidden()
+    pending_source=plan(page)
+    pending_token=page.evaluate('encodePlan(state)')
+    page.locator('#scheduleDialog [data-close-dialog]').first.tap();page.locator('#menuDialog [data-close-dialog]').tap()
+    set_range(page,'10:00','11:00')
+    page.locator('#manageMenu').tap();page.locator(f'[data-open-dish="{base['dishes'][2]['id']}"]').tap();reopen(id);search()
+    assert '10:20–10:35' in page.locator('#scheduleResult').inner_text()
+    # A pending predecessor must be arranged first.
+    seed([task('pending-prep',0,'10:00','10:15',['oven'],flex=True,pending=True)])
+    add_duration(15,['oven'],dish=0);search();assert '前面的待排程' in page.locator('#scheduleStatus').inner_text()
+    locked=[task('completed',1,'09:00','09:15',['stove'],flex=True,done=True),task('fixed',0,'10:00','10:40',['stove'])]
+    flex=[task('flex-one',1,'10:30','10:45',['oven'],flex=True),task('flex-two',1,'10:45','11:00',['oven'],flex=True)]
+    seed(locked+flex)
+    id=add_duration(45,['oven']);search()
+    assert '11:00–11:45' in page.locator('#scheduleResult').inner_text()
+    assert page.locator('#optimizationPreview').is_visible()
+    assert page.locator('#optimizationChanges li').count()==2
+    assert '10:30–11:15' in page.locator('#optimizedResult').inner_text()
+    assert next(t for t in plan(page)['tasks'] if t['id']=='flex-one')['start']=='10:30'
+    # Choosing the ordinary slot explicitly declines all suggested changes to other dishes.
+    page.locator('#applySchedule').tap()
+    assert plan(page)['tasks'][:4]==locked+flex
+    seed(locked+flex,end='11:15')
+    add_duration(45,['oven']);search()
+    assert page.locator('#applySchedule').is_hidden() and page.locator('#applyOptimized').is_visible()
+    assert '10:30–11:15' in page.locator('#optimizedResult').inner_text()
+    seed(locked+flex)
+    id=add_duration(45,['oven']);search()
+    snapshot=plan(page)
+    page.evaluate('() => { window.originalSet=Storage.prototype.setItem; Storage.prototype.setItem=()=>{throw new Error("Quota");}; }')
+    page.locator('#applyOptimized').tap()
+    assert '原排程未调整' in page.locator('#scheduleStatus').inner_text() and plan(page)==snapshot
+    page.evaluate('() => { Storage.prototype.setItem=window.originalSet; }')
+    page.locator('#applyOptimized').tap()
+    result=plan(page)
+    assert result['tasks'][:2]==locked
+    assert next(t for t in result['tasks'] if t['id']=='flex-one')['start']=='10:00'
+    assert next(t for t in result['tasks'] if t['id']=='flex-two')['start']=='10:15'
+    assert next(t for t in result['tasks'] if t['id']==id)['start']=='10:30'
+    assert page.locator('.capacity-conflict').count()==0
+    page.reload();assert plan(page)==result
+    # Completed steps cannot be silently turned back into pending duration work.
+    open_step(page,'completed');page.locator('#taskNote').fill('已完成的备注');page.locator('#saveTask').tap()
+    assert next(t for t in plan(page)['tasks'] if t['id']=='completed')=={**locked[0],'note':'已完成的备注'}
+    page.locator('[data-edit-task="completed"]').tap();page.locator('#taskDuration').fill('20');page.locator('#saveTask').tap()
+    assert '标为待处理' in page.locator('#taskError').inner_text()
+    assert plan(page)['tasks'][0]=={**locked[0],'note':'已完成的备注'}
+    seed(locked+flex)
+    add_duration(45,['oven']);search()
+    external=plan(page);external['tasks'][0]['note']='另一页面的新备注'
+    page.evaluate('([k,v])=>localStorage.setItem(k,JSON.stringify(v))',[KEY,external])
+    page.locator('#applyOptimized').tap()
+    assert '排程已变化' in page.locator('#scheduleStatus').inner_text()
+    assert plan(page)==external
+    # New transfer metadata preserves pending mode, duration, and existing fixed anchors.
+    other=browser.new_context();dest=other.new_page();dest.on('pageerror',lambda e:errors.append(str(e)))
+    dest.goto(url);dest.locator('#manageMenu').click();dest.locator('#openTransfer').click()
+    dest.locator('#importText').fill(pending_token);dest.locator('#previewImport').click();dest.locator('#confirmImport').click()
+    assert semantic_plan(plan(dest))==semantic_plan(pending_source)
+    assert len([t for t in plan(dest)['tasks'] if t.get('scheduled') is False])==1
+    dest.reload();assert semantic_plan(plan(dest))==semantic_plan(pending_source)
+    assert not errors,errors
+    other.close();context.close()
+    print('PASS: duration prompt/pending state, capacities/tools/people, continuous slots, same-dish order, optional optimization, fixed/completed locks, save failure and transfer metadata')
+
+
+def test_empty_column_and_now(browser,url,errors):
+    from datetime import datetime,timezone
+    context=browser.new_context(viewport={'width':375,'height':812},is_mobile=True,has_touch=True,timezone_id='UTC')
+    page=context.new_page();page.on('pageerror',lambda e:errors.append(str(e)))
+    page.clock.install(time=datetime(2026,11,6,12,0,tzinfo=timezone.utc))
+    page.goto(url)
+    assert page.locator('.unassigned-head,.lane[data-unassigned]').count()==0
+    assert page.locator('#nowLine').is_visible()
+    assert page.locator('#nowLine span').inner_text()=='now'
+    assert page.locator('#nowLine span').evaluate('(e)=>parseFloat(getComputedStyle(e).fontSize)')==9
+    assert page.locator('.help-button').evaluate('(e)=>{const s=getComputedStyle(e,"::before");return parseFloat(s.width)+parseFloat(s.borderLeftWidth)+parseFloat(s.borderRightWidth);}')==20
+    page.locator('#manageMenu').tap();page.locator('#addDish').tap();page.locator('#addDishTask').tap();page.locator('#saveTask').tap()
+    id=plan(page)['tasks'][-1]['id']
+    page.locator('#menuDialog [data-close-dialog]').tap()
+    assert page.locator('.unassigned-head').count()==1
+    page.locator('[data-resize-unassigned]').focus();page.keyboard.press('ArrowRight')
+    width=plan(page)['unassignedWidth']
+    page.locator('[data-filter="done"]').tap();assert page.locator('.unassigned-head').count()==0
+    page.locator('[data-filter="all"]').tap();assert abs(page.locator('.unassigned-head').bounding_box()['width']-width)<1
+    open_step(page,id);page.locator('#applianceChecks input').first.check();page.locator('#saveTask').tap();page.locator('#menuDialog [data-close-dialog]').tap()
+    assert page.locator('.unassigned-head').count()==0 and plan(page)['unassignedWidth']==width
+    open_step(page,id);page.locator('#applianceChecks input:checked').uncheck();page.locator('#saveTask').tap();page.locator('#menuDialog [data-close-dialog]').tap()
+    assert abs(page.locator('.unassigned-head').bounding_box()['width']-width)<1
+    set_range(page,'16:00','19:00');assert page.locator('#nowLine').is_hidden()
+    assert page.locator('.unassigned-head').count()==0
+    assert not errors,errors
+    context.close()
+    print('PASS: empty/filtered/out-of-range unassigned column visibility, retained width, smaller help glyph and current-time label')
 
 
 def run():
@@ -1040,6 +1218,8 @@ def run():
             test_mobile_compatibility(browser, url, errors)
             test_completion_links_and_compact_layout(browser, url, errors)
             test_unassigned_width_and_help(browser, url, errors)
+            test_duration_scheduling(browser, url, errors)
+            test_empty_column_and_now(browser, url, errors)
             browser.close()
             print('PASS: mobile layout and real touch resizing; no JavaScript errors')
     finally:

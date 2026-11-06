@@ -49,6 +49,10 @@ function validState(value) {
   const tasks = new Set();
   return value.tasks.every(t => {
     if (!t || typeof t.id !== "string" || tasks.has(t.id) || !validTime(t.start) || !validTime(t.end) || minutes(t.end) <= minutes(t.start) || !Array.isArray(t.appliances) || !t.appliances.every(id => ids.has(id)) || typeof t.name !== "string" || typeof t.dish !== "string" || typeof t.note !== "string" || typeof t.done !== "boolean") return false;
+    if (t.timingMode !== undefined && !["fixed", "duration"].includes(t.timingMode)) return false;
+    if (t.scheduled !== undefined && typeof t.scheduled !== "boolean") return false;
+    if (t.timingMode === "duration" && (!Number.isInteger(t.duration) || t.duration < 1 || t.duration > 1439 || minutes(t.end) - minutes(t.start) !== t.duration)) return false;
+    if (t.scheduled === false && (t.timingMode !== "duration" || t.done)) return false;
     tasks.add(t.id); return true;
   }) && (value.timelineStart === undefined || validTime(value.timelineStart)) && (value.timelineEnd === undefined || (validTime(value.timelineEnd) && minutes(value.timelineEnd) > minutes(value.timelineStart || "10:00")));
 }
@@ -111,6 +115,7 @@ function save() {
   updateSaveStatus();
   return saved;
 }
+function isScheduled(task) { return task.scheduled !== false; }
 function minutes(time) { const [h, m] = time.split(":").map(Number); return h * 60 + m; }
 function esc(value) { return String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c])); }
 function display(value, fallback) { return value || fallback; }
@@ -152,7 +157,7 @@ function findCapacityConflicts() {
   const conflicts = new Map();
   for (const appliance of state.appliances) {
     if (!appliance.capacity) continue;
-    const tasks = state.tasks.filter(t => t.appliances.includes(appliance.id));
+    const tasks = state.tasks.filter(t => isScheduled(t) && t.appliances.includes(appliance.id));
     const boundaries = [...new Set(tasks.flatMap(t => [minutes(t.start), minutes(t.end)]))].sort((a, b) => a - b);
     for (const time of boundaries) {
       const active = tasks.filter(t => minutes(t.start) <= time && minutes(t.end) > time);
@@ -185,15 +190,16 @@ function render() {
   const end = minutes(state.timelineEnd);
   timelineDuration = end - start;
   $("planner").style.setProperty("--timeline-height", `${timelineDuration / 60 * hourHeight}px`);
-  const visible = state.tasks.filter(t => (filter === "all" || (filter === "done" ? t.done : !t.done)) && minutes(t.end) > start && minutes(t.start) < end);
+  const visible = state.tasks.filter(t => isScheduled(t) && (filter === "all" || (filter === "done" ? t.done : !t.done)) && minutes(t.end) > start && minutes(t.start) < end);
   const unassigned = visible.filter(t => t.appliances.length === 0);
+  const showUnassigned = unassigned.length > 0;
   const unassignedLayout = layoutTasks(unassigned);
   const layouts = state.appliances.map(a => layoutTasks(visible.filter(t => t.appliances.includes(a.id))));
   const defaultWidth = Math.max(MIN_COLUMN_WIDTH, (document.querySelector(".planner-wrap").clientWidth - 28) / 4);
   const widths = state.appliances.map(a => a.width || defaultWidth);
-  const unassignedWidth = state.unassignedWidth || defaultWidth;
+  const unassignedWidth = showUnassigned ? state.unassignedWidth || defaultWidth : 0;
   $("planner").style.width = `calc(var(--sidebar) + ${widths.reduce((a, b) => a + b, 0) + unassignedWidth + 48}px)`;
-  $("applianceHeads").innerHTML = `<div class="unassigned-head" style="flex-basis:${unassignedWidth}px"><strong>无器具</strong><small>${state.tasks.filter(t => t.appliances.length === 0).length} 个步骤</small><span class="column-resize" data-resize-unassigned role="separator" tabindex="0" aria-label="调整无器具列宽" aria-orientation="vertical" aria-valuemin="${MIN_COLUMN_WIDTH}" aria-valuemax="${MAX_COLUMN_WIDTH}" aria-valuenow="${Math.round(unassignedWidth)}"></span></div>` + state.appliances.map((a, i) => `<div class="appliance-head ${draggedResourceId === a.id ? "reordering" : ""}" data-appliance-id="${esc(a.id)}" style="flex-basis:${widths[i]}px"><button type="button" class="appliance-open ${a.name.trim() ? "" : "icon-only"}" data-open-appliance="${esc(a.id)}" aria-label="设置${esc(resourceLabel(a))}"><span class="tool-icon">${esc(a.icon)}</span>${a.name.trim() ? `<strong>${esc(a.name)}</strong><small>${state.tasks.filter(t => t.appliances.includes(a.id)).length} 个步骤${a.capacity ? ` · 上限 ${a.capacity}` : ""}</small>` : ""}</button><button type="button" class="column-move" data-move-appliance="${esc(a.id)}" aria-label="左右拖动排序${esc(resourceLabel(a))}" title="左右拖动排序">⠿</button><span class="column-resize" data-resize-appliance="${esc(a.id)}" role="separator" tabindex="0" aria-label="调整${esc(resourceLabel(a))}列宽" aria-orientation="vertical" aria-valuemin="${MIN_COLUMN_WIDTH}" aria-valuemax="${MAX_COLUMN_WIDTH}" aria-valuenow="${Math.round(widths[i])}"></span></div>`).join("") + '<div class="add-appliance-cell"><button id="addAppliance" type="button" aria-label="添加器具或人员" title="添加器具或人员">＋</button></div>';
+  $("applianceHeads").innerHTML = (showUnassigned ? `<div class="unassigned-head" style="flex-basis:${unassignedWidth}px"><strong>无器具</strong><small>${state.tasks.filter(t => isScheduled(t) && t.appliances.length === 0).length} 个步骤</small><span class="column-resize" data-resize-unassigned role="separator" tabindex="0" aria-label="调整无器具列宽" aria-orientation="vertical" aria-valuemin="${MIN_COLUMN_WIDTH}" aria-valuemax="${MAX_COLUMN_WIDTH}" aria-valuenow="${Math.round(unassignedWidth)}"></span></div>` : "") + state.appliances.map((a, i) => `<div class="appliance-head ${draggedResourceId === a.id ? "reordering" : ""}" data-appliance-id="${esc(a.id)}" style="flex-basis:${widths[i]}px"><button type="button" class="appliance-open ${a.name.trim() ? "" : "icon-only"}" data-open-appliance="${esc(a.id)}" aria-label="设置${esc(resourceLabel(a))}"><span class="tool-icon">${esc(a.icon)}</span>${a.name.trim() ? `<strong>${esc(a.name)}</strong><small>${state.tasks.filter(t => isScheduled(t) && t.appliances.includes(a.id)).length} 个步骤${a.capacity ? ` · 上限 ${a.capacity}` : ""}</small>` : ""}</button><button type="button" class="column-move" data-move-appliance="${esc(a.id)}" aria-label="左右拖动排序${esc(resourceLabel(a))}" title="左右拖动排序">⠿</button><span class="column-resize" data-resize-appliance="${esc(a.id)}" role="separator" tabindex="0" aria-label="调整${esc(resourceLabel(a))}列宽" aria-orientation="vertical" aria-valuemin="${MIN_COLUMN_WIDTH}" aria-valuemax="${MAX_COLUMN_WIDTH}" aria-valuenow="${Math.round(widths[i])}"></span></div>`).join("") + '<div class="add-appliance-cell"><button id="addAppliance" type="button" aria-label="添加器具或人员" title="添加器具或人员">＋</button></div>';
   $("addAppliance").onclick = () => openAppliance();
   const firstHour = Math.ceil(start / 60) * 60;
   $("timeAxis").innerHTML = Array.from({ length: Math.max(0, Math.ceil((end - firstHour) / 60)) }, (_, index) => {
@@ -201,7 +207,7 @@ function render() {
     return `<div class="time-label" style="top:${(time - start) / 60 * hourHeight}px">${Math.floor(time / 60)}</div>`;
   }).join("");
   $("lanes").style.backgroundPositionY = `${(firstHour - start) / 60 * hourHeight}px`;
-  $("lanes").innerHTML = `<div class="lane" data-unassigned style="flex-basis:${unassignedWidth}px">${unassigned.map(t => taskCard(t, unassignedLayout)).join("")}</div>` + state.appliances.map((a, i) => `<div class="lane" data-resource-id="${esc(a.id)}" data-person="${isPerson(a)}" style="flex-basis:${widths[i]}px">${visible.filter(t => t.appliances.includes(a.id)).map(t => taskCard(t, layouts[i])).join("")}</div>`).join("");
+  $("lanes").innerHTML = (showUnassigned ? `<div class="lane" data-unassigned style="flex-basis:${unassignedWidth}px">${unassigned.map(t => taskCard(t, unassignedLayout)).join("")}</div>` : "") + state.appliances.map((a, i) => `<div class="lane" data-resource-id="${esc(a.id)}" data-person="${isPerson(a)}" style="flex-basis:${widths[i]}px">${visible.filter(t => t.appliances.includes(a.id)).map(t => taskCard(t, layouts[i])).join("")}</div>`).join("");
   renderConnections();
   renderMenu();
   document.querySelectorAll("[data-open-appliance]").forEach(b => b.onclick = () => openAppliance(b.dataset.openAppliance));
@@ -286,7 +292,7 @@ function renderConnections() {
   const contains = (outer, inner) => outer.id !== inner.id && minutes(outer.start) <= minutes(inner.start) && minutes(outer.end) >= minutes(inner.end)
     && (outer.start !== inner.start || outer.end !== inner.end);
   for (const dish of state.dishes) {
-    const tasks = state.tasks.filter(t => t.dishId === dish.id && (t.appliances.length === 0 || t.appliances.some(id => !people.has(id)))).sort((a, b) => minutes(a.start) - minutes(b.start));
+    const tasks = state.tasks.filter(t => isScheduled(t) && t.dishId === dish.id && (t.appliances.length === 0 || t.appliances.some(id => !people.has(id)))).sort((a, b) => minutes(a.start) - minutes(b.start));
     for (const to of tasks) {
       const candidates = tasks.filter(from => from.id !== to.id && minutes(from.end) <= minutes(to.start));
       const latestEnd = Math.max(-1, ...candidates.map(from => minutes(from.end)));
@@ -342,6 +348,7 @@ function startResize(event) {
     } else {
       task.end = addMinutes("00:00", initialEnd + boundDelta(delta, initialStart + minimumDuration - initialEnd, 1439 - initialEnd));
     }
+    if (task.timingMode === "duration") task.duration = minutes(task.end) - minutes(task.start);
     render();
   };
   const finish = (e) => {
@@ -353,6 +360,7 @@ function startResize(event) {
     if (e.type === "pointercancel") {
       task.start = addMinutes("00:00", initialStart);
       task.end = addMinutes("00:00", initialEnd);
+      if (task.timingMode === "duration") task.duration = initialEnd - initialStart;
     }
     save(); render();
   };
@@ -463,14 +471,16 @@ function renderMenu() {
       $("dishName").value = dish.name;
       $("dishName").dataset.editing = dish.id;
     }
-    const tasks = state.tasks.filter(t => t.dishId === dish.id).sort((a, b) => minutes(a.start) - minutes(b.start));
+    const tasks = state.tasks.filter(t => t.dishId === dish.id).sort((a, b) => Number(!isScheduled(a)) - Number(!isScheduled(b)) || minutes(a.start) - minutes(b.start));
     $("menuList").innerHTML = tasks.map(t => {
       const tools = t.appliances.map(id => { const a = state.appliances.find(a => a.id === id); return `${a?.icon || ""} ${resourceLabel(a)}`; }).join("、") || "未分配器具或人力";
-      return `<div class="step-row"><button type="button" class="step-check ${t.done ? "done" : ""}" data-toggle-step="${esc(t.id)}" aria-label="${t.done ? "标为待处理" : "标为完成"}" aria-pressed="${t.done}">${t.done ? "✓" : "○"}</button><button type="button" class="step-edit" data-edit-task="${esc(t.id)}"><strong>${esc(display(t.name, "未命名步骤"))}</strong><span>${t.start}–${t.end} · ${esc(tools)}${capacityConflicts.has(t.id) ? " · 占用超限" : ""}</span></button></div>`;
+      return `<div class="step-row"><button type="button" class="step-check ${t.done ? "done" : ""}" data-toggle-step="${esc(t.id)}" aria-label="${t.done ? "标为待处理" : "标为完成"}" aria-pressed="${t.done}" ${isScheduled(t) ? "" : "disabled"}>${t.done ? "✓" : "○"}</button><button type="button" class="step-edit" data-edit-task="${esc(t.id)}"><strong>${esc(display(t.name, "未命名步骤"))}</strong><span>${isScheduled(t) ? `${t.start}–${t.end}` : `${t.duration} 分钟 · 待排程`} · ${esc(tools)}${capacityConflicts.has(t.id) ? " · 占用超限" : ""}</span></button>${t.timingMode === "duration" && !t.done ? `<button type="button" class="button button-quiet" data-schedule-task="${esc(t.id)}">排程</button>` : ""}</div>`;
     }).join("") || '<p class="empty-state">还没有步骤，点下方添加。</p>';
+    document.querySelectorAll("[data-schedule-task]").forEach(b => b.onclick = () => openScheduling(b.dataset.scheduleTask));
     document.querySelectorAll("[data-edit-task]").forEach(b => b.onclick = () => openTask(b.dataset.editTask));
     document.querySelectorAll("[data-toggle-step]").forEach(b => b.onclick = () => {
       const task = state.tasks.find(t => t.id === b.dataset.toggleStep);
+      if (!isScheduled(task)) return;
       task.done = !task.done; save(); render();
       document.querySelectorAll("[data-toggle-step]").forEach(next => { if (next.dataset.toggleStep === task.id) next.focus(); });
     });
@@ -490,7 +500,7 @@ function openMenu() {
 }
 function openTask(id = "", dishId = "") {
   const task = state.tasks.find(t => t.id === id);
-  const previous = state.tasks.filter(t => t.dishId === dishId).sort((a, b) => minutes(b.end) - minutes(a.end))[0];
+  const previous = state.tasks.filter(t => isScheduled(t) && t.dishId === dishId).sort((a, b) => minutes(b.end) - minutes(a.end))[0];
   const start = Math.min(1438, previous ? minutes(previous.end) : minutes(state.timelineStart));
   $("taskDialogTitle").textContent = task ? "编辑步骤" : "添加步骤";
   $("taskId").value = id;
@@ -503,11 +513,21 @@ function openTask(id = "", dishId = "") {
   $("taskEnd").value = task?.end || addMinutes("00:00", Math.min(1439, start + 30));
   $("taskNote").value = task?.note || "";
   $("taskError").textContent = "";
+  $("taskTimingMode").value = task?.timingMode || "fixed";
+  $("taskDuration").value = task?.duration || 30;
+  updateTimingFields();
   const choice = a => `<label class="check-item"><input type="checkbox" value="${esc(a.id)}" ${task?.appliances.includes(a.id) ? "checked" : ""}>${esc(a.icon)} ${esc(resourceLabel(a))}</label>`;
   $("applianceChecks").innerHTML = state.appliances.filter(a => !isPerson(a)).map(choice).join("") || '<span class="empty-state">可稍后在时间轴右侧添加器具。</span>';
   $("peopleChecks").innerHTML = state.appliances.filter(isPerson).map(choice).join("") || '<span class="empty-state">在时间轴右侧添加 👨🏻‍🍳 或 👩🏻‍🍳，即可在此选择参与者。</span>';
   $("deleteTask").hidden = !task;
   $("taskDialog").showModal();
+}
+function updateTimingFields() {
+  const duration = $("taskTimingMode").value === "duration";
+  $("fixedTimeFields").hidden = duration;
+  $("durationFields").hidden = !duration;
+  $("taskStart").disabled = duration; $("taskEnd").disabled = duration;
+  $("taskDuration").disabled = !duration; $("taskDuration").required = duration;
 }
 function closeDialog(id) {
   const dialog = $(id);
@@ -559,6 +579,7 @@ function deleteAppliance(id) {
   state.appliances = state.appliances.filter(a => a.id !== id); state.tasks.forEach(t => t.appliances = t.appliances.filter(a => a !== id)); closeDialog("applianceDialog"); save(); render();
 }
 document.querySelectorAll(".filter").forEach(b => b.onclick = () => { filter = b.dataset.filter; document.querySelectorAll(".filter").forEach(x => x.classList.toggle("active", x === b)); render(); });
+$("taskTimingMode").onchange = updateTimingFields;
 $("showHelp").onclick = () => $("helpDialog").showModal();
 $("applianceIcon").onchange = updateResourceLabels;
 $("deleteAppliance").onclick = () => deleteAppliance($("applianceId").value);
@@ -594,9 +615,19 @@ $("taskForm").addEventListener("submit", (e) => {
   const id = $("taskId").value || `t${crypto.randomUUID()}`;
   const name = $("taskName").value.trim();
 
-  const start = $("taskStart").value;
-  const end = $("taskEnd").value;
+  const mode = $("taskTimingMode").value;
+  const existing = state.tasks.find(t => t.id === id);
+  let start = $("taskStart").value, end = $("taskEnd").value;
+  const duration = Number($("taskDuration").value);
   const appliances = [...document.querySelectorAll("#applianceChecks input:checked, #peopleChecks input:checked")].map(x => x.value);
+  const keepSchedule = mode === "duration" && existing?.timingMode === "duration" && isScheduled(existing) && duration === existing.duration
+    && $("taskDish").value === existing.dishId && appliances.length === existing.appliances.length && appliances.every(id => existing.appliances.includes(id));
+  if (mode === "duration") {
+    if (!Number.isInteger(duration) || duration < 1 || duration > 1439) { $("taskError").textContent = "请填写 1–1439 分钟。"; return; }
+    if (existing?.done && !keepSchedule) { $("taskError").textContent = "请先将此步骤标为待处理，再使用所需时间排程。"; return; }
+    const provisionalStart = Math.max(0, Math.min(1439 - duration, validTime(start) ? minutes(start) : minutes(state.timelineStart)));
+    start = addMinutes("00:00", provisionalStart); end = addMinutes("00:00", provisionalStart + duration);
+  }
   if (!validTime(start) || !validTime(end) || minutes(end) <= minutes(start)) {
     $("taskError").textContent = "结束时间必须晚于开始时间"; return;
   }
@@ -605,11 +636,12 @@ $("taskForm").addEventListener("submit", (e) => {
     const name = $("taskNewDish").value.trim();
     dish = { id: `d${crypto.randomUUID()}`, name }; state.dishes.push(dish);
   }
-  const data = { id, name, dish: dish.name, dishId: dish.id, start, end, appliances, note: $("taskNote").value.trim(), done: state.tasks.find(t => t.id === id)?.done || false };
+  const data = { id, name, dish: dish.name, dishId: dish.id, start, end, appliances, note: $("taskNote").value.trim(), done: existing?.done || false, timingMode: mode, ...(mode === "duration" ? { duration, scheduled: keepSchedule } : { scheduled: true }) };
   if ($("menuDialog").open) selectedDishId = dish.id;
   const index = state.tasks.findIndex(t => t.id === id);
   index >= 0 ? state.tasks.splice(index, 1, data) : state.tasks.push(data);
   closeDialog("taskDialog"); save(); render();
+  if (mode === "duration" && !keepSchedule) openScheduling(id);
 });
 $("applianceForm").addEventListener("submit", (e) => {
   e.preventDefault();
@@ -651,30 +683,161 @@ $("resetDemo").onclick = () => { if (confirm("恢复示例排程？当前数据�
     t.dishId = dish.id;
   });
   selectedDishId = null; save(); render(); } };
+// Duration steps remain pending until the user accepts a concrete proposal.
+function scheduleBounds(task, plan) {
+  const index = plan.findIndex(t => t.id === task.id);
+  const earlier = plan.slice(0, index).filter(t => t.dishId === task.dishId);
+  if (earlier.some(t => !isScheduled(t))) return null;
+  const later = plan.slice(index + 1).filter(t => t.dishId === task.dishId && isScheduled(t));
+  return {
+    start: Math.max(minutes(state.timelineStart), ...earlier.map(t => minutes(t.end))),
+    end: Math.min(minutes(state.timelineEnd), ...later.map(t => minutes(t.start)))
+  };
+}
+function slotAvailable(task, start, end, plan) {
+  for (const id of task.appliances) {
+    const resource = state.appliances.find(a => a.id === id);
+    if (!resource?.capacity) continue;
+    const others = plan.filter(t => t.id !== task.id && isScheduled(t) && t.appliances.includes(id) && minutes(t.start) < end && minutes(t.end) > start);
+    const boundaries = [start, ...others.map(t => minutes(t.start)).filter(t => t > start && t < end)];
+    for (const time of boundaries) {
+      const dishes = new Set(others.filter(t => minutes(t.start) <= time && minutes(t.end) > time).map(t => t.dishId));
+      dishes.add(task.dishId);
+      if (dishes.size > resource.capacity) return false;
+    }
+  }
+  return true;
+}
+function findScheduleSlot(task, plan) {
+  const bounds = scheduleBounds(task, plan);
+  if (!bounds) return null;
+  for (let start = bounds.start; start + task.duration <= bounds.end; start++) {
+    if (slotAvailable(task, start, start + task.duration, plan)) return { start, end: start + task.duration };
+  }
+  return null;
+}
+function placeScheduledTask(plan, id, slot) {
+  const task = plan.find(t => t.id === id);
+  Object.assign(task, { start: addMinutes("00:00", slot.start), end: addMinutes("00:00", slot.end), scheduled: true });
+}
+function scheduleProposals(id) {
+  const task = state.tasks.find(t => t.id === id);
+  const baselineSlot = findScheduleSlot(task, state.tasks);
+  const baseline = baselineSlot ? structuredClone(state.tasks) : null;
+  if (baseline) placeScheduledTask(baseline, id, baselineSlot);
+  const flexible = state.tasks.filter(t => t.id !== id && t.dishId !== task.dishId && t.timingMode === "duration" && !t.done && isScheduled(t)
+    && minutes(t.start) >= minutes(state.timelineStart) && minutes(t.end) <= minutes(state.timelineEnd));
+  if (!flexible.length) return { baseline, optimized: null, changes: [] };
+  const optimized = structuredClone(state.tasks);
+  const flexibleIds = new Set(flexible.map(t => t.id));
+  optimized.forEach(t => { if (flexibleIds.has(t.id) || t.id === id) t.scheduled = false; });
+  const changes = [];
+  for (const original of flexible) {
+    const candidate = optimized.find(t => t.id === original.id);
+    const slot = findScheduleSlot(candidate, optimized);
+    // An optimization may make another dish earlier, never later.
+    if (!slot || slot.start > minutes(original.start)) return { baseline, optimized: null, changes: [] };
+    placeScheduledTask(optimized, original.id, slot);
+    if (slot.start !== minutes(original.start)) changes.push({ before: original, after: { ...candidate } });
+  }
+  const optimizedTask = optimized.find(t => t.id === id);
+  const slot = findScheduleSlot(optimizedTask, optimized);
+  if (!changes.length || !slot || baselineSlot && slot.start > baselineSlot.start) return { baseline, optimized: null, changes: [] };
+  placeScheduledTask(optimized, id, slot);
+  return { baseline, optimized, changes };
+}
+let pendingScheduling = null;
+function resetScheduleResults() {
+  pendingScheduling = null;
+  $("scheduleResult").hidden = true;
+  $("optimizationPreview").hidden = true;
+  $("applySchedule").hidden = true;
+  $("applyOptimized").hidden = true;
+  $("scheduleStatus").textContent = "";
+}
+function openScheduling(id) {
+  const task = state.tasks.find(t => t.id === id);
+  if (!task || task.done || task.timingMode !== "duration") return;
+  resetScheduleResults();
+  $("scheduleDialog").dataset.taskId = id;
+  $("skipSchedule").textContent = isScheduled(task) ? "保持原时间" : "暂不分配";
+  $("scheduleIntro").textContent = `${task.duration} 分钟，在 ${state.timelineStart}–${state.timelineEnd} 内按器具和人力容量查找；确认前不会调整排程。`;
+  $("scheduleDialog").showModal();
+}
+$("findSchedule").onclick = () => {
+  resetScheduleResults();
+  const id = $("scheduleDialog").dataset.taskId;
+  const task = state.tasks.find(t => t.id === id);
+  if (!task) return;
+  let saved;
+  try { saved = localStorage.getItem(STORAGE_KEY); } catch { $("scheduleStatus").textContent = "无法读取缓存，暂不能应用自动排程。"; return; }
+  if (storageWarning) { $("scheduleStatus").textContent = "请先解决保存问题；当前新内容尚未保存，请勿刷新。"; return; }
+  const snapshot = JSON.stringify(state);
+  if (saved !== snapshot) { $("scheduleStatus").textContent = "排程缓存已变化，请刷新页面后重试。"; return; }
+  if (!scheduleBounds(task, state.tasks)) { $("scheduleStatus").textContent = "请先安排本菜前面的待排程步骤。"; return; }
+  const proposal = scheduleProposals(id);
+  pendingScheduling = { ...proposal, id, snapshot, saved };
+  if (proposal.baseline) {
+    const candidate = proposal.baseline.find(t => t.id === id);
+    $("scheduleResult").textContent = `可安排为 ${candidate.start}–${candidate.end}，不调整其他步骤。`;
+    $("scheduleResult").hidden = false;
+    $("applySchedule").hidden = false;
+  }
+  if (proposal.optimized) {
+    const candidate = proposal.optimized.find(t => t.id === id);
+    $("optimizationChanges").innerHTML = proposal.changes.map(({ before, after }) => `<li><strong>${esc(display(before.dish, "未命名菜品"))} · ${esc(display(before.name, "未命名步骤"))}</strong><br>${before.start}–${before.end} → ${after.start}–${after.end}</li>`).join("");
+    $("optimizedResult").textContent = `调整后，本步骤可安排为 ${candidate.start}–${candidate.end}。固定时间和已完成步骤保持原位。`;
+    $("optimizationPreview").hidden = false;
+    $("applyOptimized").hidden = false;
+  }
+  if (!proposal.baseline && !proposal.optimized) $("scheduleStatus").textContent = "时间范围内没有可用空档。可延长时间范围，或检查所选器具和人力的容量。";
+};
+function applyScheduleProposal(optimized) {
+  if (!pendingScheduling) return;
+  const proposal = pendingScheduling;
+  const tasks = optimized ? proposal.optimized : proposal.baseline;
+  if (!tasks) return;
+  try {
+    if (JSON.stringify(state) !== proposal.snapshot || localStorage.getItem(STORAGE_KEY) !== proposal.saved) {
+      $("scheduleStatus").textContent = "排程已变化，请重新查找；其他页面修改后请先刷新。"; return;
+    }
+    const next = { ...state, tasks };
+    if (!validState(next)) throw new Error("Invalid schedule");
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    state = next;
+  } catch { $("scheduleStatus").textContent = "无法保存自动排程，原排程未调整。"; return; }
+  pendingScheduling = null; storageWarning = ""; filter = "all";
+  document.querySelectorAll(".filter").forEach(b => b.classList.toggle("active", b.dataset.filter === "all"));
+  closeDialog("scheduleDialog"); render();
+}
+$("applySchedule").onclick = () => applyScheduleProposal(false);
+$("applyOptimized").onclick = () => applyScheduleProposal(true);
+
 // Compact, versioned, compressed clipboard format. All processing stays in the browser.
 function packPlan(plan) {
   const resources = new Map(plan.appliances.map((a, i) => [a.id, i]));
   const dishes = new Map(plan.dishes.map((d, i) => [d.id, i]));
-  return [2, minutes(plan.timelineStart), minutes(plan.timelineEnd), plan.visibleHours || 2.5, plan.dragStep || 5,
+  return [3, minutes(plan.timelineStart), minutes(plan.timelineEnd), plan.visibleHours || 2.5, plan.dragStep || 5,
     plan.appliances.map(a => [a.name, a.icon, a.width || 0, a.capacity || 0]),
     plan.dishes.map(d => d.name),
-    plan.tasks.map(t => [t.name, dishes.get(t.dishId), minutes(t.start), minutes(t.end), t.appliances.map(id => resources.get(id)), t.note, t.done ? 1 : 0]), plan.unassignedWidth || 0];
+    plan.tasks.map(t => [t.name, dishes.get(t.dishId), minutes(t.start), minutes(t.end), t.appliances.map(id => resources.get(id)), t.note, t.done ? 1 : 0, t.timingMode === "duration" ? t.duration : 0, isScheduled(t) ? 1 : 0]), plan.unassignedWidth || 0];
 }
 function unpackPlan(data) {
   const bad = () => { throw new Error("传输文本的内容不完整或格式不正确"); };
-  if (!Array.isArray(data) || !(data[0] === 1 && data.length === 8 || data[0] === 2 && data.length === 9)) return bad();
+  if (!Array.isArray(data) || !(data[0] === 1 && data.length === 8 || [2, 3].includes(data[0]) && data.length === 9)) return bad();
   const [, start, end, visibleHours, dragStep, resources, dishes, tasks, unassignedWidth = 0] = data;
   if (!Number.isFinite(unassignedWidth) || unassignedWidth !== 0 && (unassignedWidth < MIN_COLUMN_WIDTH || unassignedWidth > MAX_COLUMN_WIDTH)) return bad();
   if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end > 1439 || start >= end || !SCALES.includes(visibleHours) || !DRAG_STEPS.includes(dragStep)) return bad();
   if (!Array.isArray(resources) || resources.length > 1000 || !Array.isArray(dishes) || dishes.length > 5000 || !dishes.every(d => typeof d === "string") || !Array.isArray(tasks) || tasks.length > 20000) return bad();
   if (!resources.every(a => Array.isArray(a) && a.length === 4 && typeof a[0] === "string" && typeof a[1] === "string" && Number.isFinite(a[2]) && (a[2] === 0 || a[2] >= MIN_COLUMN_WIDTH && a[2] <= MAX_COLUMN_WIDTH) && [0, 1, 2, 3].includes(a[3]))) return bad();
-  if (!tasks.every(t => Array.isArray(t) && t.length === 7 && typeof t[0] === "string" && Number.isInteger(t[1]) && t[1] >= 0 && t[1] < dishes.length && Number.isInteger(t[2]) && Number.isInteger(t[3]) && t[2] >= 0 && t[3] <= 1439 && t[2] < t[3] && Array.isArray(t[4]) && new Set(t[4]).size === t[4].length && t[4].every(i => Number.isInteger(i) && i >= 0 && i < resources.length) && typeof t[5] === "string" && [0, 1].includes(t[6]))) return bad();
+  if (!tasks.every(t => Array.isArray(t) && t.length === (data[0] === 3 ? 9 : 7) && typeof t[0] === "string" && Number.isInteger(t[1]) && t[1] >= 0 && t[1] < dishes.length && Number.isInteger(t[2]) && Number.isInteger(t[3]) && t[2] >= 0 && t[3] <= 1439 && t[2] < t[3] && Array.isArray(t[4]) && new Set(t[4]).size === t[4].length && t[4].every(i => Number.isInteger(i) && i >= 0 && i < resources.length) && typeof t[5] === "string" && [0, 1].includes(t[6]))) return bad();
+  if (data[0] === 3 && !tasks.every(t => Number.isInteger(t[7]) && t[7] >= 0 && t[7] <= 1439 && [0, 1].includes(t[8]) && (t[7] ? t[3] - t[2] === t[7] && !(t[6] && !t[8]) : t[8] === 1))) return bad();
   const plan = {
     resourceIconVersion: 1, timelineStart: addMinutes("00:00", start), timelineEnd: addMinutes("00:00", end), visibleHours, dragStep, ...(unassignedWidth ? { unassignedWidth } : {}),
     appliances: resources.map(a => ({ id: `a${crypto.randomUUID()}`, name: a[0], icon: a[1], ...(a[2] ? { width: a[2] } : {}), capacity: a[3] })),
     dishes: dishes.map(name => ({ id: `d${crypto.randomUUID()}`, name }))
   };
-  plan.tasks = tasks.map(t => ({ id: `t${crypto.randomUUID()}`, name: t[0], dishId: plan.dishes[t[1]].id, dish: dishes[t[1]], start: addMinutes("00:00", t[2]), end: addMinutes("00:00", t[3]), appliances: t[4].map(i => plan.appliances[i].id), note: t[5], done: Boolean(t[6]) }));
+  plan.tasks = tasks.map(t => ({ id: `t${crypto.randomUUID()}`, name: t[0], dishId: plan.dishes[t[1]].id, dish: dishes[t[1]], start: addMinutes("00:00", t[2]), end: addMinutes("00:00", t[3]), appliances: t[4].map(i => plan.appliances[i].id), note: t[5], done: Boolean(t[6]), ...(data[0] === 3 && t[7] ? { timingMode: "duration", duration: t[7], scheduled: Boolean(t[8]) } : {}) }));
   if (!validState(plan)) return bad();
   return plan;
 }

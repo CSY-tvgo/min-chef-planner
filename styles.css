@@ -9,7 +9,7 @@
   --coral: #eaa18f;
   --purple: #c9c4e7;
   --blue: #b6dce4;
-  --sidebar: 150px;
+  --sidebar: 28px;
   --lane: 150px;
   --hour: 88px;
   font-family: "Manrope", sans-serif;
@@ -53,7 +53,7 @@ button { cursor: pointer; }
 .button-danger { margin-right: auto; background: transparent; }
 [hidden] { display: none !important; }
 @media (max-width: 650px) {
-  :root { --sidebar: 64px; }
+  :root { --sidebar: 28px; }
   .topbar { margin-bottom: 24px; }
   .intro { margin-bottom: 18px; }
   .intro h2 { font-size: 28px; }
@@ -72,3 +72,32 @@ button { cursor: pointer; }
 .task-card .move-handle, .task-card .check { position: absolute; top: 7px; height: min(22px, calc(100% - 14px)); min-height: 0; line-height: 1; }
 .task-card .move-handle { right: 3px; }
 .task-card .check { right: 28px; }
+
+/* A fixed time scale and independent appliance widths, on touch and desktop. */
+.planner-wrap { overflow: auto; overscroll-behavior: contain; }
+.planner { min-width: 0; }
+.timeline-corner { height: 64px; position: sticky; left: 0; top: 0; z-index: 6; padding: 0; background: var(--paper); }
+.appliance-heads { height: 64px; position: sticky; top: 0; z-index: 4; background: var(--paper); }
+.appliance-head { padding: 26px 6px 4px; }
+.appliance-head .tool-icon { position: absolute; top: 5px; left: 6px; width: 18px; height: 18px; font-size: 12px; margin: 0; }
+.appliance-head strong { display: block; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.appliance-head small { margin: 3px 0 0; font-size: 9px; }
+.delete-appliance { top: 1px; right: 8px; width: 22px; height: 22px; }
+.column-resize { position: absolute; right: -5px; top: 0; height: 100%; width: 12px; cursor: col-resize; touch-action: none; z-index: 5; }
+.column-resize::after { content: ""; position: absolute; left: 5px; top: 20px; height: 24px; width: 2px; background: var(--muted); border-radius: 2px; }
+.column-resize:focus-visible { outline: 2px solid var(--green); }
+.time-axis { position: sticky; left: 0; z-index: 3; background: var(--paper); }
+.time-label { position: absolute; left: 0; width: 100%; height: auto; padding: 2px 3px; border: 0; font-size: 11px; }
+.lanes { background: repeating-linear-gradient(to bottom, var(--line) 0, var(--line) 1px, transparent 1px, transparent var(--hour)); }
+.task-card { padding: 8px 4px 30px; }
+.task-card strong { white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
+.task-card small { font-size: 9px; line-height: 1.4; }
+.task-card .move-handle, .task-card .check { top: auto; bottom: 7px; height: 20px; width: 20px; }
+.task-card .move-handle { right: 3px; }
+.task-card .check { left: 3px; right: auto; }
+.task-card.short { padding: 0 3px; }
+.task-card.short strong { font-size: 10px; white-space: nowrap; }
+.task-card.short small, .task-card.short .check { display: none; }
+.task-card.short .move-handle { top: 7px; bottom: auto; height: max(0px, calc(100% - 14px)); width: 14px; right: 0; font-size: 12px; }
+.task-card.short strong { padding-right: 12px; }
+.now-line span { left: -26px; font-size: 7px; }

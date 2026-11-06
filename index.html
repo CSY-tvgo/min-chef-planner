@@ -39,16 +39,14 @@
           </div>
           <div class="toolbar-group">
             <button class="button button-outline" id="addAppliance" type="button">＋ 器具</button>
-            <button class="button button-outline" id="setTimelineStart" type="button">起始时间</button>
+            <button class="button button-outline" id="setTimelineStart" type="button">时间范围</button>
             <button class="button button-outline" id="manageMenu" type="button">☷ 菜单</button>
           </div>
         </section>
 
         <section class="planner-wrap">
           <div class="planner" id="planner">
-            <div class="timeline-corner">
-              <span>时间 / 器具</span>
-            </div>
+            <div class="timeline-corner" aria-hidden="true"></div>
             <div class="appliance-heads" id="applianceHeads"></div>
             <div class="timeline-body">
               <div class="time-axis" id="timeAxis"></div>
@@ -92,8 +90,8 @@
     </dialog>
     <dialog id="timelineDialog" class="modal">
       <form id="timelineForm">
-        <div class="modal-head"><div><p class="eyebrow accent">时间轴</p><h3>设置起始时间</h3></div><button class="icon-button" type="button" data-close-dialog="timelineDialog" aria-label="关闭">×</button></div>
-        <label>起始时间<input id="timelineStart" type="time" required /></label>
+        <div class="modal-head"><div><p class="eyebrow accent">时间轴</p><h3>设置时间范围</h3></div><button class="icon-button" type="button" data-close-dialog="timelineDialog" aria-label="关闭">×</button></div>
+        <div class="form-grid"><label>起始时间<input id="timelineStart" type="time" required /></label><label>结束时间<input id="timelineEnd" type="time" required /></label></div><p id="timelineError" role="alert" class="save-error"></p>
         <div class="modal-actions"><button class="button button-quiet" type="button" data-close-dialog="timelineDialog">取消</button><button class="button button-primary" type="submit">保存</button></div>
       </form>
     </dialog>

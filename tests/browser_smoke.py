@@ -35,6 +35,28 @@ def drag(page, locator, delta):
     assert not page.locator('#taskDialog').evaluate('(d) => d.open')
 
 
+def scale(page):
+    return page.locator('#planner').evaluate('(el) => parseFloat(el.style.getPropertyValue("--hour"))')
+
+
+def set_range(page, start, end):
+    page.locator('#setTimelineStart').click()
+    page.locator('#timelineStart').fill(start)
+    page.locator('#timelineEnd').fill(end)
+    page.locator('#timelineForm button[type="submit"]').click()
+
+
+def resize_column(page, delta):
+    handle = page.locator('.column-resize').first
+    handle.scroll_into_view_if_needed()
+    box = handle.bounding_box()
+    x, y = box['x'] + box['width']/2, box['y'] + box['height']/2
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x + delta, y, steps=8)
+    page.mouse.up()
+
+
 def run():
     server = ThreadingHTTPServer(('127.0.0.1', 0), partial(QuietHandler, directory=str(ROOT)))
     Thread(target=server.serve_forever, daemon=True).start()
@@ -53,6 +75,28 @@ def run():
             assert page.title() == '宴席厨房排程'
             assert page.locator('.appliance-head').count() == 4
             assert page.locator('.task-card').count() == 9
+            assert page.locator('.timeline-corner').inner_text() == ''
+            assert page.locator('.time-axis').bounding_box()['width'] == 28
+            assert page.locator('.time-label').first.inner_text() == '10'
+            wrap = page.locator('.planner-wrap').bounding_box()
+            assert 2.4 < (wrap['height'] - 64) / scale(page) < 2.6
+            widths = page.locator('.appliance-head').evaluate_all('(els) => els.map(e => e.getBoundingClientRect().width)')
+            assert max(widths) - min(widths) < 1
+            assert abs(widths[0] - (wrap['width'] - 30)/4) < 1
+            resize_column(page, 60)
+            assert abs(page.locator('.lane').first.bounding_box()['width'] - widths[0] - 60) < 1
+            assert abs(page.locator('.lane').nth(1).bounding_box()['width'] - widths[1]) < 1
+            resized_width = page.locator('.lane').first.bounding_box()['width']
+            page.reload()
+            assert abs(page.locator('.lane').first.bounding_box()['width'] - resized_width) < 1
+            set_range(page, '10:15', '12:10')
+            assert page.locator('.time-label').first.inner_text() == '11'
+            body = page.locator('.timeline-body').bounding_box()
+            for box in page.locator('.task-card').evaluate_all('(els) => els.map(e => {const r=e.getBoundingClientRect(); return {top:r.top,bottom:r.bottom};})'):
+                assert box['top'] >= body['y'] - 1
+                assert box['bottom'] <= body['y'] + body['height'] + 1
+            assert page.locator('[data-id="t8"]').count() == 1
+            set_range(page, '10:00', '22:00')
             # Simultaneous tasks remain individually visible and clickable.
             cards = page.locator('.lane').first.locator('.task-card[data-id="t6"], .task-card[data-id="t7"]')
             a, b = [cards.nth(i).bounding_box() for i in range(2)]
@@ -76,17 +120,25 @@ def run():
             page.locator('[data-filter="done"]').click()
             assert page.locator('.task-card').count() == 3
             page.locator('[data-filter="all"]').click()
-            # Resize exactly to 15 minutes; move preserves duration, both appliance copies update.
-            drag(page, page.locator(f'.task-card[data-id="{new_id}"] .resize-handle.bottom').first, -22)
-            assert plan(page)['tasks'][-1]['end'] == '19:15'
-            drag(page, page.locator(f'.task-card[data-id="{new_id}"] .move-handle').first, -88)
-            assert (plan(page)['tasks'][-1]['start'], plan(page)['tasks'][-1]['end']) == ('18:00', '18:15')
-            assert page.locator(f'.task-card[data-id="{new_id}"] small').all_text_contents() == ['18:00–18:15 · 未命名菜品'] * 2
+            # Resize and move by five minutes; both appliance copies update.
+            drag(page, page.locator(f'.task-card[data-id="{new_id}"] .resize-handle.bottom').first, -scale(page)/12)
+            assert plan(page)['tasks'][-1]['end'] == '19:25'
+            drag(page, page.locator(f'.task-card[data-id="{new_id}"] .move-handle').first, -scale(page)/12)
+            assert (plan(page)['tasks'][-1]['start'], plan(page)['tasks'][-1]['end']) == ('18:55', '19:20')
+            assert page.locator(f'.task-card[data-id="{new_id}"] small').all_text_contents() == ['18:55–19:20 · 未命名菜品'] * 2
+            # Dragging against midnight still uses whole five-minute increments.
+            drag(page, page.locator(f'.task-card[data-id="{new_id}"] .move-handle').first, scale(page)*8)
+            assert (plan(page)['tasks'][-1]['start'], plan(page)['tasks'][-1]['end']) == ('23:30', '23:55')
             # Timeline changes don't remove earlier tasks from the menu.
-            page.locator('#setTimelineStart').click()
-            page.locator('#timelineStart').fill('20:00')
-            page.locator('#timelineForm button[type="submit"]').click()
-            assert page.locator('.time-label').first.inner_text() == '20:00'
+            set_range(page, '20:00', '21:00')
+            assert page.locator('.time-label').first.inner_text() == '20'
+            assert page.locator(f'.task-card[data-id="{new_id}"]').count() == 0
+            page.reload()
+            assert plan(page)['timelineEnd'] == '21:00'
+            set_range(page, '20:00', '19:00')
+            assert page.locator('#timelineError').inner_text()
+            assert page.locator('#timelineDialog').evaluate('(d) => d.open')
+            page.locator('#timelineDialog [data-close-dialog]').first.click()
             page.locator('#manageMenu').click()
             page.locator(f'[data-edit-task="{new_id}"]').click()
             page.locator('#taskName').fill('改名')
@@ -132,20 +184,36 @@ def run():
             session = context.new_cdp_session(mobile)
             touch = {'x': box['x'] + box['width']/2, 'y': box['y'] + box['height']/2}
             session.send('Input.dispatchTouchEvent', {'type': 'touchStart', 'touchPoints': [touch]})
-            touch['y'] += 44
+            touch['y'] += scale(mobile)/12
             session.send('Input.dispatchTouchEvent', {'type': 'touchMove', 'touchPoints': [touch]})
             session.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []})
-            assert next(t for t in plan(mobile)['tasks'] if t['id'] == 't2')['end'] == '12:30'
+            assert next(t for t in plan(mobile)['tasks'] if t['id'] == 't2')['end'] == '12:05'
             assert not mobile.locator('#taskDialog').evaluate('(d) => d.open')
             # Cancellation restores original duration and releases drag listeners.
             handle = mobile.locator('[data-id="t2"] .resize-handle.bottom').first
             box = handle.bounding_box()
             touch = {'x': box['x'] + box['width']/2, 'y': box['y'] + box['height']/2}
             session.send('Input.dispatchTouchEvent', {'type': 'touchStart', 'touchPoints': [touch]})
-            touch['y'] += 22
+            touch['y'] += scale(mobile)/12
             session.send('Input.dispatchTouchEvent', {'type': 'touchMove', 'touchPoints': [touch]})
             session.send('Input.dispatchTouchEvent', {'type': 'touchCancel', 'touchPoints': []})
-            assert next(t for t in plan(mobile)['tasks'] if t['id'] == 't2')['end'] == '12:30'
+            assert next(t for t in plan(mobile)['tasks'] if t['id'] == 't2')['end'] == '12:05'
+            # Column resizing also works with real touch, and only changes this appliance.
+            column = mobile.locator('.column-resize').first
+            column.scroll_into_view_if_needed()
+            before = mobile.locator('.appliance-head').evaluate_all('(els) => els.map(e => e.getBoundingClientRect().width)')
+            box = column.bounding_box()
+            touch = {'x': box['x'] + box['width']/2, 'y': box['y'] + box['height']/2}
+            session.send('Input.dispatchTouchEvent', {'type': 'touchStart', 'touchPoints': [touch]})
+            touch['x'] += 20
+            session.send('Input.dispatchTouchEvent', {'type': 'touchMove', 'touchPoints': [touch]})
+            session.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []})
+            after = mobile.locator('.appliance-head').evaluate_all('(els) => els.map(e => e.getBoundingClientRect().width)')
+            assert abs(after[0] - before[0] - 20) < 1
+            assert abs(after[1] - before[1]) < 1
+            mobile.reload()
+            assert abs(mobile.locator('.lane').first.bounding_box()['width'] - after[0]) < 1
+            assert mobile.evaluate('document.documentElement.scrollWidth <= innerWidth')
             assert not errors, errors
             context.close()
             browser.close()

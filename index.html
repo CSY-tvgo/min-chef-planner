@@ -17,7 +17,7 @@
           </div>
         </div>
         <div class="top-actions">
-          <span class="save-state" id="saveState"><span class="status-dot"></span>已自动保存</span>
+          <span class="save-state" id="saveState" role="status"><span class="status-dot"></span>已自动保存</span>
           <button class="button button-quiet" id="resetDemo" type="button">恢复示例</button>
           <button class="button button-primary" id="addTaskTop" type="button">＋ 添加步骤</button>
         </div>
@@ -57,14 +57,14 @@
             </div>
           </div>
         </section>
-        <p class="hint">提示：同一张步骤卡可以关联多个器具；卡片之间重叠时会显示资源冲突。</p>
+        <p class="hint">拖动 ⠿ 移动步骤，上下边缘调整时长；菜单中可查看全部步骤。</p>
       </main>
     </div>
 
     <dialog id="taskDialog" class="modal">
       <form id="taskForm">
         <div class="modal-head">
-          <div><p class="eyebrow accent">NEW / EDIT STEP</p><h3 id="taskDialogTitle">添加烹饪步骤</h3></div>
+          <div><h3 id="taskDialogTitle">添加烹饪步骤</h3></div>
           <button class="icon-button" type="button" data-close-dialog="taskDialog" aria-label="关闭">×</button>
         </div>
         <input type="hidden" id="taskId" />
@@ -76,13 +76,13 @@
         </div>
         <label>使用器具 <span class="label-note">可多选</span><div class="check-list" id="applianceChecks"></div></label>
         <label>备注（可选）<textarea id="taskNote" rows="2" placeholder="例如：水开后计时 8 分钟"></textarea></label>
-        <div class="modal-actions"><button class="button button-quiet" type="button" data-close-dialog="taskDialog">取消</button><button class="button button-primary" id="saveTask" type="submit">保存步骤</button></div>
+        <div class="modal-actions"><button class="button button-danger" id="deleteTask" type="button" hidden>删除步骤</button><button class="button button-quiet" type="button" data-close-dialog="taskDialog">取消</button><button class="button button-primary" id="saveTask" type="submit">保存步骤</button></div>
       </form>
     </dialog>
 
     <dialog id="applianceDialog" class="modal">
       <form id="applianceForm">
-        <div class="modal-head"><div><p class="eyebrow accent">KITCHEN TOOL</p><h3>添加器具</h3></div><button class="icon-button" type="button" data-close-dialog="applianceDialog" aria-label="关闭">×</button></div>
+        <div class="modal-head"><div><h3>添加器具</h3></div><button class="icon-button" type="button" data-close-dialog="applianceDialog" aria-label="关闭">×</button></div>
         <label>器具名称<input id="applianceName" placeholder="可不填" /></label>
         <label>图标
           <select id="applianceIcon"><option value="◉">◉ 设备</option><option value="🍲">🍲 锅</option><option value="♨">♨ 加热</option><option value="▱">▱ 烤箱</option><option value="◌">◌ 电器</option><option value="⌁">⌁ 手工</option></select>

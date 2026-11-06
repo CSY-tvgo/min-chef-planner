@@ -180,3 +180,10 @@ button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 #transferDialog button:disabled { cursor: wait; opacity: .6; }
 #importPreview { font-size: 12px; line-height: 1.6; }
 .modal-actions { flex-wrap: wrap; }
+/* The full header supports horizontal ordering; a tap still opens settings. */
+.appliance-open { touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.resource-order { margin: 15px 0; color: var(--muted); font-size: 11px; }
+.resource-order > div { display: flex; gap: 8px; margin-top: 7px; }
+.resource-order button:disabled { opacity: .4; cursor: default; }
+.button, .icon-button, .time-settings { touch-action: manipulation; }
+.time-settings span, .time-settings svg { pointer-events: none; }

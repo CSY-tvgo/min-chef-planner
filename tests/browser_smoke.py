@@ -539,7 +539,7 @@ def test_transfer(browser, url, errors):
     assert page.evaluate('navigator.clipboard.readText()') == token
     assert len(token) < len(json.dumps(source, ensure_ascii=False).encode()) / 2
     # Clipboard denial leaves a selectable text fallback.
-    page.evaluate('() => { navigator.clipboard.writeText = async () => { throw new Error("Denied"); }; }')
+    page.evaluate('() => { navigator.clipboard.writeText = async () => { throw new Error("Denied"); }; document.execCommand = () => false; }')
     page.locator('#exportPlan').click()
     page.wait_for_function('!document.querySelector("#exportPlan").disabled')
     assert '请长按' in page.locator('#transferStatus').inner_text()
@@ -567,7 +567,10 @@ def test_transfer(browser, url, errors):
     bad_payload = [1,600,1020,2.5,5,[],[],[['坏步骤',9,600,630,[],'',0]]]
     bad_token = 'MC1.' + base64.urlsafe_b64encode(gzip.compress(json.dumps(bad_payload).encode())).decode().rstrip('=')
     bomb = 'MC1.' + base64.urlsafe_b64encode(gzip.compress(b'A'*1048577)).decode().rstrip('=')
-    for invalid in [bad_token, bomb, token[:-8]]:
+    corrupted = bytearray(base64.urlsafe_b64decode(token[4:]+'='*((4-len(token[4:])%4)%4)))
+    corrupted[-8] ^= 1
+    bad_crc = 'MC1.' + base64.urlsafe_b64encode(corrupted).decode().rstrip('=')
+    for invalid in [bad_token, bomb, token[:-8], bad_crc]:
         dest.locator('#importText').fill(invalid); dest.locator('#previewImport').click()
         dest.wait_for_function('!document.querySelector("#previewImport").disabled')
         assert dest.locator('#confirmImport').is_hidden()
@@ -586,6 +589,112 @@ def test_transfer(browser, url, errors):
     assert not errors, errors
     other.close(); context.close()
     print(f'PASS: compressed text ({len(token)} chars), clipboard/fallback, cross-device restore, Unicode, invalid/oversized imports, preview and storage failure safety')
+
+
+def test_mobile_compatibility(browser, url, errors):
+    import hashlib, re
+    context = browser.new_context(viewport={'width': 375, 'height': 812}, is_mobile=True, has_touch=True)
+    # Reproduce a device without native compression or the modern clipboard API.
+    context.add_init_script('''
+        window.CompressionStream = undefined;
+        window.DecompressionStream = undefined;
+        Object.defineProperty(navigator, 'clipboard', { get: () => undefined });
+        document.execCommand = () => false;
+    ''')
+    page = context.new_page()
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    # Old cached unversioned resources must never be requested by the new page.
+    page.route(re.compile(r'/app\.js$'), lambda route: route.fulfill(body='window.oldCachedScript = true;', content_type='application/javascript'))
+    page.route(re.compile(r'/styles\.css$'), lambda route: route.fulfill(body='.column-move { pointer-events:none; }', content_type='text/css'))
+    page.goto(url)
+    assert page.locator('.task-card').count() == 9
+    for name in ['app.js', 'styles.css', 'vendor/fflate-0.8.2.min.js']:
+        expected = name + '?v=' + hashlib.sha256((ROOT / name).read_bytes()).hexdigest()[:12]
+        assert page.locator(f'[src^="{name}"], [href^="{name}"]').evaluate('(e) => e.getAttribute("src") || e.getAttribute("href")') == expected
+    assert page.evaluate('typeof CompressionStream') == 'undefined'
+    # Real taps still open settings, while dragging the whole header sorts columns.
+    page.locator('.appliance-open').first.tap()
+    assert page.locator('#applianceDialog').evaluate('(d) => d.open')
+    assert page.locator('#moveResourceLeft').is_disabled()
+    page.locator('#moveResourceRight').tap()
+    assert page.locator('#moveResourceLeft').is_enabled()
+    page.locator('#moveResourceLeft').tap()
+    page.locator('#applianceDialog [data-close-dialog]').first.tap()
+    order = [a['id'] for a in plan(page)['appliances']]
+    source = page.locator('.appliance-open').first.bounding_box()
+    target = page.locator('.appliance-open').nth(1).bounding_box()
+    touch = {'x':source['x']+source['width']/2,'y':source['y']+44}
+    session = context.new_cdp_session(page)
+    session.send('Input.dispatchTouchEvent', {'type':'touchStart','touchPoints':[touch]})
+    touch['x'] = target['x']+target['width']*.75
+    touch['y'] += 3
+    session.send('Input.dispatchTouchEvent', {'type':'touchMove','touchPoints':[touch]})
+    session.send('Input.dispatchTouchEvent', {'type':'touchEnd','touchPoints':[]})
+    assert [a['id'] for a in plan(page)['appliances']][:2] == order[:2][::-1]
+    assert not page.locator('#applianceDialog').evaluate('(d) => d.open')
+    page.locator('#setTimelineStart').tap()
+    page.locator('#timelineScale').select_option('2')
+    page.locator('#timelineStep').select_option('15')
+    page.locator('#timelineForm button[type="submit"]').tap()
+    page.reload()
+    assert plan(page)['visibleHours'] == 2 and plan(page)['dragStep'] == 15
+    handle = page.locator('[data-id="t2"] .resize-handle.bottom')
+    handle.scroll_into_view_if_needed()
+    box = handle.bounding_box()
+    touch = {'x':box['x']+box['width']/2,'y':box['y']+box['height']/2}
+    session.send('Input.dispatchTouchEvent', {'type':'touchStart','touchPoints':[touch]})
+    touch['y'] += scale(page)/4
+    session.send('Input.dispatchTouchEvent', {'type':'touchMove','touchPoints':[touch]})
+    session.send('Input.dispatchTouchEvent', {'type':'touchEnd','touchPoints':[]})
+    assert next(t for t in plan(page)['tasks'] if t['id']=='t2')['end'] == '12:15'
+    # Keep failed persistence visible in the settings dialog instead of closing silently.
+    page.evaluate('() => { window.savedSet = Storage.prototype.setItem; Storage.prototype.setItem = () => { throw new Error("Quota"); }; }')
+    page.locator('#setTimelineStart').tap()
+    page.locator('#timelineScale').select_option('3')
+    page.locator('#timelineForm button[type="submit"]').tap()
+    assert page.locator('#timelineDialog').evaluate('(d) => d.open')
+    assert '缓存保存失败' in page.locator('#timelineError').inner_text()
+    page.evaluate('() => { Storage.prototype.setItem = window.savedSet; }')
+    page.locator('#timelineForm button[type="submit"]').tap()
+    assert plan(page)['visibleHours']==3
+    page.locator('#manageMenu').tap(); page.locator('#openTransfer').tap()
+    page.locator('#exportPlan').tap()
+    page.wait_for_function('!document.querySelector("#exportPlan").disabled')
+    token = page.locator('#exportText').input_value()
+    assert token.startswith('MC1.')
+    assert '请长按' in page.locator('#transferStatus').inner_text()
+    assert page.locator('#copyExport').is_enabled()
+    page.locator('#copyExport').tap()
+    assert page.locator('#exportText').evaluate('(e) => e.selectionEnd-e.selectionStart') == len(token)
+    page.locator('#importText').fill(token)
+    page.locator('#previewImport').tap()
+    page.locator('#confirmImport').wait_for(state='visible')
+    before = semantic_plan(plan(page))
+    page.locator('#confirmImport').tap()
+    assert semantic_plan(plan(page)) == before
+    # Finger taps execute mutating actions once, including quickly repeated taps.
+    count = len(plan(page)['dishes'])
+    page.locator('#manageMenu').tap(); page.locator('#addDish').tap()
+    assert len(plan(page)['dishes']) == count + 1
+    page.locator('#menuBack').tap(); page.locator('#addDish').tap()
+    assert len(plan(page)['dishes']) == count + 2
+    page.locator('#menuBack').tap(); page.locator('[data-open-dish]').first.tap()
+    task_id = page.locator('[data-toggle-step]').first.get_attribute('data-toggle-step')
+    done = next(t for t in plan(page)['tasks'] if t['id']==task_id)['done']
+    page.locator('[data-toggle-step]').first.tap()
+    assert next(t for t in plan(page)['tasks'] if t['id']==task_id)['done'] != done
+    page.locator('[data-edit-task]').first.tap()
+    page.wait_for_timeout(350)  # Let any delayed native compatibility click arrive.
+    assert page.locator('#taskDialog').evaluate('(d) => d.open')
+    checkbox = page.locator('#applianceChecks input').first
+    checked = checkbox.is_checked()
+    checkbox.tap()
+    assert checkbox.is_checked() != checked
+    page.locator('#taskDialog [data-close-dialog]').first.tap()
+    assert page.locator('#menuDialog').evaluate('(d) => d.open')
+    assert not errors, errors
+    context.close()
+    print('PASS: cached old assets, missing compression/clipboard APIs, whole-header mobile drag/tap, persisted settings, real touch step and visible storage errors')
 
 
 def run():
@@ -759,6 +868,7 @@ def run():
             test_unassigned_and_links(browser, url, errors)
             test_sequence_and_settings(browser, url, errors)
             test_transfer(browser, url, errors)
+            test_mobile_compatibility(browser, url, errors)
             browser.close()
             print('PASS: mobile layout and real touch resizing; no JavaScript errors')
     finally:

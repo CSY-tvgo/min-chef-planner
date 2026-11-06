@@ -93,14 +93,17 @@ let timelineDuration = 0;
 let capacityConflicts = new Map();
 const $ = (id) => document.getElementById(id);
 function save() {
+  let saved = true;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     storageWarning = "";
   } catch {
+    saved = false;
     storageWarning = "保存失败，请勿关闭页面";
   }
   $("saveState").textContent = storageWarning || SAVE_MESSAGE;
   $("saveState").classList.toggle("save-error", Boolean(storageWarning));
+  return saved;
 }
 function minutes(time) { const [h, m] = time.split(":").map(Number); return h * 60 + m; }
 function esc(value) { return String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c])); }
@@ -214,12 +217,13 @@ function render() {
       document.querySelectorAll("[data-resize-appliance]").forEach(next => { if (next.dataset.resizeAppliance === a.id) next.focus(); });
     });
   });
-  document.querySelectorAll("[data-move-appliance]").forEach(handle => {
+  document.querySelectorAll("[data-move-appliance], .appliance-open").forEach(handle => {
     handle.addEventListener("pointerdown", startColumnMove);
     handle.addEventListener("keydown", e => {
       if (!["ArrowLeft", "ArrowRight"].includes(e.key)) return;
       e.preventDefault();
-      const i = state.appliances.findIndex(a => a.id === handle.dataset.moveAppliance);
+      const id = handle.dataset.moveAppliance || handle.dataset.openAppliance;
+      const i = state.appliances.findIndex(a => a.id === id);
       const to = Math.max(0, Math.min(state.appliances.length - 1, i + (e.key === "ArrowRight" ? 1 : -1)));
       const [resource] = state.appliances.splice(i, 1);
       state.appliances.splice(to, 0, resource);
@@ -363,12 +367,11 @@ function startColumnMove(event) {
   if (!event.isPrimary || event.button !== 0) return;
   event.preventDefault();
   event.stopPropagation();
-  const id = event.currentTarget.dataset.moveAppliance;
+  const id = event.currentTarget.dataset.moveAppliance || event.currentTarget.dataset.openAppliance;
   const original = [...state.appliances];
   const pointerId = event.pointerId, initialX = event.clientX;
   let clientX = initialX, moving = false, frame;
   const planner = $("planner"), wrap = document.querySelector(".planner-wrap");
-  planner.setPointerCapture(pointerId);
   const update = () => {
     if (!moving) return;
     const otherHeads = [...document.querySelectorAll("[data-appliance-id]")].filter(el => el.dataset.applianceId !== id);
@@ -392,7 +395,11 @@ function startColumnMove(event) {
   const move = e => {
     if (e.pointerId !== pointerId) return;
     clientX = e.clientX;
-    if (!moving && Math.abs(clientX - initialX) > 6) { moving = true; draggedResourceId = id; }
+    if (!moving && Math.abs(clientX - initialX) > 6) {
+      moving = true; draggedResourceId = id;
+      planner.setPointerCapture(pointerId);
+      render();
+    }
     update();
   };
   const finish = e => {
@@ -405,7 +412,7 @@ function startColumnMove(event) {
     if (planner.hasPointerCapture(pointerId)) planner.releasePointerCapture(pointerId);
     if (e.type === "pointercancel") state.appliances = original;
     draggedResourceId = null;
-    save(); render();
+    if (moving) { save(); render(); }
   };
   const escape = e => { if (e.key === "Escape") { e.preventDefault(); finish({ pointerId, type: "pointercancel" }); } };
   document.addEventListener("pointermove", move);
@@ -500,8 +507,24 @@ function openAppliance(id = "") {
   updateResourceLabels();
   $("applianceCapacity").value = String(appliance?.capacity || 0);
   $("deleteAppliance").hidden = !appliance;
+  updateOrderButtons();
   $("applianceDialog").showModal();
 }
+function updateOrderButtons() {
+  const i = state.appliances.findIndex(a => a.id === $("applianceId").value);
+  $("resourceOrder").hidden = i < 0;
+  $("moveResourceLeft").disabled = i <= 0;
+  $("moveResourceRight").disabled = i < 0 || i === state.appliances.length - 1;
+}
+function moveResourceBy(offset) {
+  const i = state.appliances.findIndex(a => a.id === $("applianceId").value);
+  const to = i + offset;
+  if (i < 0 || to < 0 || to >= state.appliances.length) return;
+  const [resource] = state.appliances.splice(i, 1); state.appliances.splice(to, 0, resource);
+  save(); render(); updateOrderButtons();
+}
+$("moveResourceLeft").onclick = () => moveResourceBy(-1);
+$("moveResourceRight").onclick = () => moveResourceBy(1);
 function deleteAppliance(id) {
   if (!confirm("删除后会解除步骤关联，步骤仍会保留。确定删除吗？")) return;
   state.appliances = state.appliances.filter(a => a.id !== id); state.tasks.forEach(t => t.appliances = t.appliances.filter(a => a !== id)); closeDialog("applianceDialog"); save(); render();
@@ -576,12 +599,14 @@ $("timelineForm").addEventListener("submit", (e) => {
     return;
   }
   const visibleHours = Number($("timelineScale").value), dragStep = Number($("timelineStep").value);
-  if (!SCALES.includes(visibleHours) || !DRAG_STEPS.includes(dragStep)) return;
+  if (!SCALES.includes(visibleHours) || !DRAG_STEPS.includes(dragStep)) { $("timelineError").textContent = "请选择有效的比例尺和步进。"; return; }
   const wrap = document.querySelector(".planner-wrap");
   const position = start === state.timelineStart && end === state.timelineEnd ? wrap.scrollTop / hourHeight : 0;
   Object.assign(state, { timelineStart: start, timelineEnd: end, visibleHours, dragStep });
-  closeDialog("timelineDialog"); save(); render();
+  const saved = save(); render();
   wrap.scrollTop = position * hourHeight;
+  if (saved) closeDialog("timelineDialog");
+  else $("timelineError").textContent = "设置已应用，但缓存保存失败；刷新后可能丢失。";
 });
 $("deleteTask").onclick = () => {
   if (!confirm("删除这个步骤？")) return;
@@ -622,11 +647,21 @@ function unpackPlan(data) {
   if (!validState(plan)) return bad();
   return plan;
 }
-async function encodePlan(plan) {
-  if (typeof CompressionStream === "undefined") throw new Error("此浏览器暂不支持压缩传输，请使用新版浏览器");
+const crcTable = Array.from({ length: 256 }, (_, i) => {
+  let crc = i;
+  for (let bit = 0; bit < 8; bit++) crc = crc & 1 ? 0xedb88320 ^ crc >>> 1 : crc >>> 1;
+  return crc >>> 0;
+});
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) crc = crcTable[(crc ^ byte) & 255] ^ crc >>> 8;
+  return (crc ^ 0xffffffff) >>> 0;
+}
+function encodePlan(plan) {
+  if (!globalThis.fflate) throw new Error("压缩组件未加载，请刷新页面后重试。");
   const raw = new TextEncoder().encode(JSON.stringify(packPlan(plan)));
   if (raw.length > 1048576) throw new Error("排程过大，暂无法生成传输文本");
-  const compressed = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer());
+  const compressed = fflate.gzipSync(raw, { level: 9, mtime: 0 });
   let binary = "";
   for (const byte of compressed) binary += String.fromCharCode(byte);
   const token = "MC1." + btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -634,25 +669,30 @@ async function encodePlan(plan) {
   return token;
 }
 async function decodePlan(text) {
-  if (typeof DecompressionStream === "undefined") throw new Error("此浏览器暂不支持压缩传输，请使用新版浏览器");
+  if (!globalThis.fflate) throw new Error("压缩组件未加载，请刷新页面后重试。");
   const token = text.replace(/\s/g, "");
   if (token.length > 200000 || !/^MC1\.[A-Za-z0-9_-]+$/.test(token)) throw new Error("请粘贴完整的 MC1. 排程文本");
   try {
     const base64 = token.slice(4).replace(/-/g, "+").replace(/_/g, "/");
     const bytes = Uint8Array.from(atob(base64 + "=".repeat((4 - base64.length % 4) % 4)), c => c.charCodeAt(0));
-    const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip")).getReader();
+    if (bytes.length < 18 || bytes[0] !== 31 || bytes[1] !== 139 || bytes[2] !== 8) throw new Error("Invalid gzip");
+    const trailer = new DataView(bytes.buffer, bytes.byteOffset + bytes.length - 8, 8);
+    const expectedSize = trailer.getUint32(4, true);
+    if (expectedSize > 1048576) throw new Error("Too large");
     const chunks = [];
     let size = 0;
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      size += value.length;
-      if (size > 1048576) { await reader.cancel(); throw new Error("Too large"); }
-      chunks.push(value);
+    const decoder = new fflate.Gunzip(chunk => {
+      size += chunk.length;
+      if (size > 1048576) throw new Error("Too large");
+      chunks.push(chunk.slice());
+    });
+    for (let offset = 0; offset < bytes.length; offset += 1024) {
+      decoder.push(bytes.subarray(offset, offset + 1024), offset + 1024 >= bytes.length);
     }
     const buffer = new Uint8Array(size);
     let offset = 0;
     chunks.forEach(chunk => { buffer.set(chunk, offset); offset += chunk.length; });
+    if (size !== expectedSize || crc32(buffer) !== trailer.getUint32(0, true)) throw new Error("Checksum mismatch");
     return unpackPlan(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(buffer)));
   } catch {
     throw new Error("传输文本无效、已损坏或内容过大，请重新复制完整文本");
@@ -668,21 +708,31 @@ $("openTransfer").onclick = () => {
   for (const id of ["exportText", "importText"]) $(id).value = "";
   $("confirmImport").hidden = true;
   $("importPreview").hidden = true;
+  $("copyExport").disabled = true;
   transferMessage("");
   $("transferDialog").showModal();
 };
+async function copyExportText() {
+  const token = $("exportText").value;
+  if (!token) return;
+  let copied = false;
+  try { await navigator.clipboard.writeText(token); copied = true; }
+  catch {
+    $("exportText").focus(); $("exportText").select();
+    $("exportText").setSelectionRange(0, token.length);
+    try { copied = document.execCommand("copy"); } catch { /* Manual selection remains available. */ }
+  }
+  transferMessage(copied ? `已复制压缩文本（${token.length} 字符），可粘贴到另一台设备。` : `已生成压缩文本（${token.length} 字符），请长按或选中文本复制。`);
+}
+$("copyExport").onclick = copyExportText;
 $("exportPlan").onclick = async () => {
   $("exportPlan").disabled = true;
+  $("copyExport").disabled = true;
+  $("exportText").value = "";
   try {
-    const token = await encodePlan(structuredClone(state));
-    $("exportText").value = token;
-    try {
-      await navigator.clipboard.writeText(token);
-      transferMessage(`已复制压缩文本（${token.length} 字符），可粘贴到另一台设备。`);
-    } catch {
-      $("exportText").focus(); $("exportText").select();
-      transferMessage(`已生成压缩文本（${token.length} 字符），请长按或选中文本复制。`);
-    }
+    $("exportText").value = encodePlan(state);
+    $("copyExport").disabled = false;
+    await copyExportText();
   } catch (error) { transferMessage(error.message, true); }
   finally { $("exportPlan").disabled = false; }
 };
@@ -719,6 +769,36 @@ $("confirmImport").onclick = () => {
   closeDialog("transferDialog"); closeDialog("menuDialog"); render();
   const wrap = document.querySelector(".planner-wrap"); wrap.scrollTop = 0; wrap.scrollLeft = 0;
 };
+
+// Some mobile engines suppress the compatibility click after a column drag.
+// Activate a stationary finger release once, and consume its later ghost click.
+const touchButtons = new Map();
+let recentTouchTaps = [];
+document.addEventListener("pointerdown", event => {
+  if (event.pointerType !== "touch" || !event.isPrimary) return;
+  const button = event.target.closest?.("button:not(.column-move)");
+  if (button && !button.disabled) touchButtons.set(event.pointerId, { button, x: event.clientX, y: event.clientY, moved: false });
+}, true);
+document.addEventListener("pointermove", event => {
+  const tap = touchButtons.get(event.pointerId);
+  if (tap && Math.hypot(event.clientX - tap.x, event.clientY - tap.y) > 8) tap.moved = true;
+}, true);
+document.addEventListener("pointercancel", event => touchButtons.delete(event.pointerId), true);
+document.addEventListener("pointerup", event => {
+  const tap = touchButtons.get(event.pointerId);
+  touchButtons.delete(event.pointerId);
+  if (!tap || tap.moved || !tap.button.isConnected || tap.button.disabled || event.target.closest?.("button") !== tap.button) return;
+  event.preventDefault();
+  recentTouchTaps = recentTouchTaps.filter(t => Date.now() - t.time < 750);
+  recentTouchTaps.push({ x: event.clientX, y: event.clientY, time: Date.now() });
+  tap.button.click();
+}, true);
+document.addEventListener("click", event => {
+  if (!event.isTrusted || !event.detail || event.pointerType === "mouse") return;
+  if (recentTouchTaps.some(t => Date.now() - t.time < 750 && Math.hypot(event.clientX - t.x, event.clientY - t.y) < 16)) {
+    event.preventDefault(); event.stopImmediatePropagation();
+  }
+}, true);
 
 window.addEventListener("resize", render);
 render();

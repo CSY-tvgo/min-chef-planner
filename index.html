@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f6f7f2" />
     <title>Min Chef（敏捷厨师）</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=1e9b3a2f74e9" />
   </head>
   <body>
     <div class="app-shell">
@@ -75,6 +75,7 @@
         <div class="modal-head"><div><h3 id="applianceDialogTitle">添加器具</h3></div><button class="icon-button" type="button" data-close-dialog="applianceDialog" aria-label="关闭">×</button></div>
         <input type="hidden" id="applianceId" />
         <label><span id="applianceNameLabel">器具名称</span><input id="applianceName" placeholder="可不填" /></label>
+        <div class="resource-order" id="resourceOrder" hidden><span>列顺序</span><div><button id="moveResourceLeft" class="button button-outline" type="button">← 向左</button><button id="moveResourceRight" class="button button-outline" type="button">向右 →</button></div></div>
         <label>图标
           <select id="applianceIcon"><option value="♨️">♨️ 灶台</option><option value="🍳">🍳 煎炒锅</option><option value="🍲">🍲 炖锅</option><option value="🌫️">🌫️ 蒸锅</option><option value="🔆">🔆 烤箱</option><option value="🍚">🍚 电饭锅</option><option value="🔌">🔌 电器</option><option value="🧰">🧰 通用器具</option><option value="👨🏻‍🍳">👨🏻‍🍳</option><option value="👩🏻‍🍳">👩🏻‍🍳</option></select>
         </label>
@@ -101,7 +102,7 @@
     <dialog id="transferDialog" class="modal">
       <div class="modal-head"><h3>导入 / 导出</h3><button class="icon-button" type="button" data-close-dialog="transferDialog" aria-label="关闭">×</button></div>
       <p class="empty-state">将压缩文本复制到另一台设备，可转移全部菜品、步骤、器具、人力和设置。</p>
-      <button id="exportPlan" class="button button-outline" type="button">生成并复制排程文本</button>
+      <button id="exportPlan" class="button button-outline" type="button">生成并复制排程文本</button> <button id="copyExport" class="button button-outline" type="button" disabled>复制文本</button>
       <label>导出文本<textarea id="exportText" rows="3" readonly aria-label="导出文本"></textarea></label>
       <label>粘贴要导入的文本<textarea id="importText" rows="3" spellcheck="false" placeholder="MC1.…"></textarea></label>
       <button id="previewImport" class="button button-outline" type="button">检查导入内容</button>
@@ -109,6 +110,7 @@
       <p id="importPreview" hidden></p>
       <button id="confirmImport" class="button button-primary" type="button" hidden>替换当前排程</button>
     </dialog>
-    <script src="app.js"></script>
+    <script src="vendor/fflate-0.8.2.min.js?v=c3b34f2e9f5e"></script>
+    <script src="app.js?v=9f999c2b45a5"></script>
   </body>
 </html>

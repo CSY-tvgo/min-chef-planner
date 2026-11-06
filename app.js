@@ -26,6 +26,7 @@ function validState(value) {
   const ids = new Set();
   for (const a of value.appliances) {
     if (!a || typeof a.id !== "string" || ids.has(a.id) || typeof a.name !== "string" || typeof a.icon !== "string" || (a.width !== undefined && (!Number.isFinite(a.width) || a.width < MIN_COLUMN_WIDTH || a.width > MAX_COLUMN_WIDTH))) return false;
+    if (a.capacity !== undefined && ![0, 1, 2, 3].includes(a.capacity)) return false;
     ids.add(a.id);
   }
   if (value.dishes !== undefined) {
@@ -74,6 +75,7 @@ let selectedDishId = null;
 let filter = "all";
 let suppressClickUntil = 0;
 let timelineDuration = 0;
+let capacityConflicts = new Map();
 const $ = (id) => document.getElementById(id);
 function save() {
   try {
@@ -117,15 +119,36 @@ function layoutTasks(tasks) {
   placeGroup();
   return positions;
 }
+// Capacity counts distinct dishes in each real interval, not the number of steps.
+// End points are exclusive so back-to-back dishes do not collide.
+function findCapacityConflicts() {
+  const conflicts = new Map();
+  for (const appliance of state.appliances) {
+    if (!appliance.capacity) continue;
+    const tasks = state.tasks.filter(t => t.appliances.includes(appliance.id));
+    const boundaries = [...new Set(tasks.flatMap(t => [minutes(t.start), minutes(t.end)]))].sort((a, b) => a - b);
+    for (const time of boundaries) {
+      const active = tasks.filter(t => minutes(t.start) <= time && minutes(t.end) > time);
+      if (new Set(active.map(t => t.dishId)).size <= appliance.capacity) continue;
+      active.forEach(t => {
+        if (!conflicts.has(t.id)) conflicts.set(t.id, new Set());
+        conflicts.get(t.id).add(display(appliance.name, "未命名器具"));
+      });
+    }
+  }
+  return conflicts;
+}
 function sizeTimeline() {
   const wrap = document.querySelector(".planner-wrap");
-  const height = Math.max(280, window.innerHeight - (wrap.getBoundingClientRect().top + window.scrollY) - 20);
+  const height = Math.max(280, window.innerHeight - (wrap.getBoundingClientRect().top + window.scrollY) - 60);
   wrap.style.height = `${height}px`;
   hourHeight = (height - 64) / 2.5;
   $("planner").style.setProperty("--hour", `${hourHeight}px`);
 }
 function render() {
   const start = minutes(state.timelineStart);
+  capacityConflicts = findCapacityConflicts();
+  $("summary").innerHTML = `<div class="stat"><strong>${state.dishes.length}</strong><span>道菜品</span></div><div class="stat"><strong>${state.appliances.length}</strong><span>件器具</span></div><div class="stat"><strong>${state.tasks.filter(t => t.done).length}/${state.tasks.length}</strong><span>步骤完成</span></div>`;
   sizeTimeline();
   const end = minutes(state.timelineEnd);
   timelineDuration = end - start;
@@ -135,8 +158,8 @@ function render() {
   const defaultWidth = Math.max(MIN_COLUMN_WIDTH, (document.querySelector(".planner-wrap").clientWidth - 28) / 4);
   const widths = state.appliances.map(a => a.width || defaultWidth);
   $("planner").style.width = `calc(var(--sidebar) + ${widths.reduce((a, b) => a + b, 0) + 48}px)`;
-  $("applianceHeads").innerHTML = state.appliances.map((a, i) => `<div class="appliance-head" data-appliance-id="${esc(a.id)}" style="flex-basis:${widths[i]}px"><span class="tool-icon">${esc(a.icon)}</span><strong>${esc(display(a.name, "未命名器具"))}</strong><small>${state.tasks.filter(t => t.appliances.includes(a.id)).length} 个步骤</small><button class="delete-appliance" data-delete-appliance="${esc(a.id)}" aria-label="删除${esc(display(a.name, "未命名器具"))}">×</button><span class="column-resize" data-resize-appliance="${esc(a.id)}" role="separator" tabindex="0" aria-label="调整${esc(display(a.name, "未命名器具"))}列宽" aria-orientation="vertical" aria-valuemin="${MIN_COLUMN_WIDTH}" aria-valuemax="${MAX_COLUMN_WIDTH}" aria-valuenow="${Math.round(widths[i])}"></span></div>`).join("") + '<div class="add-appliance-cell"><button id="addAppliance" type="button" aria-label="添加器具" title="添加器具">＋</button></div>';
-  $("addAppliance").onclick = () => $("applianceDialog").showModal();
+  $("applianceHeads").innerHTML = state.appliances.map((a, i) => `<div class="appliance-head" data-appliance-id="${esc(a.id)}" style="flex-basis:${widths[i]}px"><button type="button" class="appliance-open" data-open-appliance="${esc(a.id)}" aria-label="设置${esc(display(a.name, "未命名器具"))}"><span class="tool-icon">${esc(a.icon)}</span><strong>${esc(display(a.name, "未命名器具"))}</strong><small>${state.tasks.filter(t => t.appliances.includes(a.id)).length} 个步骤${a.capacity ? ` · 上限 ${a.capacity}` : ""}</small></button><span class="column-resize" data-resize-appliance="${esc(a.id)}" role="separator" tabindex="0" aria-label="调整${esc(display(a.name, "未命名器具"))}列宽" aria-orientation="vertical" aria-valuemin="${MIN_COLUMN_WIDTH}" aria-valuemax="${MAX_COLUMN_WIDTH}" aria-valuenow="${Math.round(widths[i])}"></span></div>`).join("") + '<div class="add-appliance-cell"><button id="addAppliance" type="button" aria-label="添加器具" title="添加器具">＋</button></div>';
+  $("addAppliance").onclick = () => openAppliance();
   const firstHour = Math.ceil(start / 60) * 60;
   $("timeAxis").innerHTML = Array.from({ length: Math.max(0, Math.ceil((end - firstHour) / 60)) }, (_, index) => {
     const time = firstHour + index * 60;
@@ -144,9 +167,9 @@ function render() {
   }).join("");
   $("lanes").style.backgroundPositionY = `${(firstHour - start) / 60 * hourHeight}px`;
   $("lanes").innerHTML = state.appliances.map((a, i) => `<div class="lane" style="flex-basis:${widths[i]}px">${visible.filter(t => t.appliances.includes(a.id)).map(t => taskCard(t, layouts[i])).join("")}</div>`).join("");
-  $("summary").innerHTML = `<div class="stat"><strong>${state.dishes.length}</strong><span>道菜品</span></div><div class="stat"><strong>${state.appliances.length}</strong><span>件器具</span></div><div class="stat"><strong>${state.tasks.filter(t => t.done).length}/${state.tasks.length}</strong><span>步骤完成</span></div>`;
   renderMenu();
-  document.querySelectorAll("[data-delete-appliance]").forEach(b => b.onclick = () => deleteAppliance(b.dataset.deleteAppliance));
+  $("capacityStatus").textContent = capacityConflicts.size ? `${capacityConflicts.size} 个步骤超出器具容量` : "";
+  document.querySelectorAll("[data-open-appliance]").forEach(b => b.onclick = () => openAppliance(b.dataset.openAppliance));
   document.querySelectorAll(".task-card").forEach(card => {
     card.onclick = (event) => { if (Date.now() > suppressClickUntil && !event.target.closest(".resize-handle, .move-handle")) openTask(card.dataset.id); };
     card.querySelector(".check").onclick = (event) => {
@@ -176,8 +199,9 @@ function taskCard(task, layout) {
   const height = (Math.min(minutes(task.end), minutes(state.timelineEnd)) - Math.max(minutes(task.start), minutes(state.timelineStart))) / 60 * hourHeight;
   const { column, count } = layout.get(task.id);
   const index = state.tasks.findIndex(t => t.id === task.id);
-  const title = `${display(task.name, "未命名步骤")} · ${display(task.dish, "未命名菜品")} ${task.start}–${task.end}`;
-  return `<article class="task-card ${height < 48 ? "short" : ""} ${task.done ? "done" : ""}" data-id="${esc(task.id)}" title="${esc(title)}" style="top:${top}px;height:${height}px;left:calc(${column / count * 100}% + ${count > 1 ? 1 : 4}px);width:calc(${100 / count}% - ${count > 1 ? 2 : 8}px);background:${COLORS[index % COLORS.length]}"><span class="resize-handle top" data-edge="start" title="拖动调整开始时间"></span><button type="button" class="move-handle" data-edge="move" aria-label="拖动移动步骤">⠿</button><button type="button" class="check" aria-label="${task.done ? "标为待处理" : "标为完成"}">${task.done ? "✓" : ""}</button><strong>${esc(display(task.name, "未命名步骤"))}</strong><small>${task.start}–${task.end} · ${esc(display(task.dish, "未命名菜品"))}${task.note ? ` · ${esc(task.note)}` : ""}</small><span class="resize-handle bottom" data-edge="end" title="拖动调整结束时间"></span></article>`;
+  const warning = capacityConflicts.has(task.id) ? ` · 占用超限：${[...capacityConflicts.get(task.id)].join("、")}` : "";
+  const title = `${display(task.name, "未命名步骤")} · ${display(task.dish, "未命名菜品")} ${task.start}–${task.end}${warning}`;
+  return `<article class="task-card ${warning ? "capacity-conflict" : ""} ${height < 48 ? "short" : ""} ${task.done ? "done" : ""}" data-id="${esc(task.id)}" title="${esc(title)}" style="top:${top}px;height:${height}px;left:calc(${column / count * 100}% + ${count > 1 ? 1 : 4}px);width:calc(${100 / count}% - ${count > 1 ? 2 : 8}px);background:${COLORS[index % COLORS.length]}"><span class="resize-handle top" data-edge="start" title="拖动调整开始时间"></span><button type="button" class="move-handle" data-edge="move" aria-label="拖动移动步骤">⠿</button><button type="button" class="check" aria-label="${task.done ? "标为待处理" : "标为完成"}">${task.done ? "✓" : ""}</button><strong>${esc(display(task.name, "未命名步骤"))}</strong><small>${task.start}–${task.end} · ${esc(display(task.dish, "未命名菜品"))}${task.note ? ` · ${esc(task.note)}` : ""}${warning ? " · 占用超限" : ""}</small><span class="resize-handle bottom" data-edge="end" title="拖动调整结束时间"></span></article>`;
 }
 function updateNowLine() {
   const now = new Date();
@@ -278,7 +302,7 @@ function renderMenu() {
     const tasks = state.tasks.filter(t => t.dishId === dish.id).sort((a, b) => minutes(a.start) - minutes(b.start));
     $("menuList").innerHTML = tasks.map(t => {
       const tools = t.appliances.map(id => display(state.appliances.find(a => a.id === id)?.name, "未命名器具")).join("、") || "未分配器具";
-      return `<div class="step-row"><button type="button" class="step-check ${t.done ? "done" : ""}" data-toggle-step="${esc(t.id)}" aria-label="${t.done ? "标为待处理" : "标为完成"}" aria-pressed="${t.done}">${t.done ? "✓" : "○"}</button><button type="button" class="step-edit" data-edit-task="${esc(t.id)}"><strong>${esc(display(t.name, "未命名步骤"))}</strong><span>${t.start}–${t.end} · ${esc(tools)}</span></button></div>`;
+      return `<div class="step-row"><button type="button" class="step-check ${t.done ? "done" : ""}" data-toggle-step="${esc(t.id)}" aria-label="${t.done ? "标为待处理" : "标为完成"}" aria-pressed="${t.done}">${t.done ? "✓" : "○"}</button><button type="button" class="step-edit" data-edit-task="${esc(t.id)}"><strong>${esc(display(t.name, "未命名步骤"))}</strong><span>${t.start}–${t.end} · ${esc(tools)}${capacityConflicts.has(t.id) ? " · 占用超限" : ""}</span></button></div>`;
     }).join("") || '<p class="empty-state">还没有步骤，点下方添加。</p>';
     document.querySelectorAll("[data-edit-task]").forEach(b => b.onclick = () => openTask(b.dataset.editTask));
     document.querySelectorAll("[data-toggle-step]").forEach(b => b.onclick = () => {
@@ -323,12 +347,26 @@ function closeDialog(id) {
   const dialog = $(id);
   if (dialog?.open) dialog.close();
 }
+function openAppliance(id = "") {
+  const appliance = state.appliances.find(a => a.id === id);
+  $("applianceId").value = id;
+  $("applianceDialogTitle").textContent = appliance ? "器具设置" : "添加器具";
+  $("applianceName").value = appliance?.name || "";
+  if (appliance && ![...$("applianceIcon").options].some(option => option.value === appliance.icon)) {
+    $("applianceIcon").add(new Option(appliance.icon, appliance.icon));
+  }
+  $("applianceIcon").value = appliance?.icon || "◉";
+  $("applianceCapacity").value = String(appliance?.capacity || 0);
+  $("deleteAppliance").hidden = !appliance;
+  $("saveAppliance").textContent = appliance ? "保存设置" : "添加器具";
+  $("applianceDialog").showModal();
+}
 function deleteAppliance(id) {
   if (!confirm("删除器具后，关联步骤将失去该器具。确定删除吗？")) return;
-  state.appliances = state.appliances.filter(a => a.id !== id); state.tasks.forEach(t => t.appliances = t.appliances.filter(a => a !== id)); save(); render();
+  state.appliances = state.appliances.filter(a => a.id !== id); state.tasks.forEach(t => t.appliances = t.appliances.filter(a => a !== id)); closeDialog("applianceDialog"); save(); render();
 }
 document.querySelectorAll(".filter").forEach(b => b.onclick = () => { filter = b.dataset.filter; document.querySelectorAll(".filter").forEach(x => x.classList.toggle("active", x === b)); render(); });
-$("addTaskTop").onclick = () => openTask();
+$("deleteAppliance").onclick = () => deleteAppliance($("applianceId").value);
 $("manageMenu").onclick = openMenu;
 $("taskDish").onchange = () => { $("newDishLabel").hidden = $("taskDish").value !== "__new__"; };
 $("menuBack").onclick = () => { selectedDishId = null; renderMenu(); };
@@ -381,9 +419,12 @@ $("taskForm").addEventListener("submit", (e) => {
 $("applianceForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const name = $("applianceName").value.trim();
-  state.appliances.push({ id: `a${crypto.randomUUID()}`, name, icon: $("applianceIcon").value });
+  const appliance = state.appliances.find(a => a.id === $("applianceId").value);
+  const settings = { name, icon: $("applianceIcon").value, capacity: Number($("applianceCapacity").value) };
+  if (appliance) Object.assign(appliance, settings);
+  else state.appliances.push({ id: `a${crypto.randomUUID()}`, ...settings });
   $("applianceForm").reset(); closeDialog("applianceDialog"); save(); render();
-  document.querySelector(".planner-wrap").scrollLeft = $("planner").offsetWidth;
+  if (!appliance) document.querySelector(".planner-wrap").scrollLeft = $("planner").offsetWidth;
 });
 $("timelineForm").addEventListener("submit", (e) => {
   e.preventDefault();

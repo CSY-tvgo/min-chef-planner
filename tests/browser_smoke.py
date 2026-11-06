@@ -165,6 +165,69 @@ def test_menu(browser, url, errors):
     print('PASS: dish-first menu, legacy migration, rename, empty/unnamed dishes, step ownership, nested dialogs, keyboard resize and trailing appliance control')
 
 
+def test_appliance_capacity(browser, url, errors):
+    context = browser.new_context(viewport={'width': 375, 'height': 812}, is_mobile=True, has_touch=True)
+    page = context.new_page()
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    page.goto(url)
+    assert page.locator('.top-actions #manageMenu').count() == 1
+    assert page.locator('#addTaskTop').count() == 0
+    assert page.locator('#setTimelineStart').get_attribute('aria-label') == '设置时间范围'
+    assert page.locator('#setTimelineStart').bounding_box()['y'] >= page.locator('.planner-wrap').bounding_box()['y'] + page.locator('.planner-wrap').bounding_box()['height']
+    assert page.locator('#setTimelineStart').bounding_box()['y'] + 32 <= page.evaluate('innerHeight')
+    assert page.locator('h1 span').inner_text() == '敏捷厨师'
+    assert '双关' not in page.locator('body').inner_text()
+    page.locator('.task-card .check').first.click()
+    data = plan(page)
+    tool = data['appliances'][0]
+    template = data['tasks'][0]
+    intervals = [('10:00', '10:30', 0), ('10:10', '10:40', 0), ('10:20', '10:30', 1), ('10:30', '10:50', 2), ('10:50', '11:00', 3)]
+    data['tasks'] = [{**template, 'id': f'c{i}', 'start': start, 'end': end, 'dishId': data['dishes'][d]['id'], 'dish': data['dishes'][d]['name'], 'appliances': [tool['id']]} for i, (start, end, d) in enumerate(intervals)]
+    page.evaluate('([k,v]) => localStorage.setItem(k, JSON.stringify(v))', [KEY, data])
+    page.reload()
+    assert page.locator('.capacity-conflict').count() == 0
+    page.locator('.appliance-open').first.click()
+    assert page.locator('#applianceCapacity').input_value() == '0'
+    page.locator('#applianceName').fill('小蒸锅')
+    page.locator('#applianceIcon').select_option('🍲')
+    page.locator('#applianceCapacity').select_option('1')
+    page.locator('#saveAppliance').click()
+    assert page.locator('.capacity-conflict').count() == 4
+    assert page.locator('[data-id="c4"]').get_attribute('class').find('capacity-conflict') < 0
+    assert '4 个步骤' in page.locator('#capacityStatus').inner_text()
+    page.reload()
+    assert plan(page)['appliances'][0]['capacity'] == 1
+    assert plan(page)['appliances'][0]['name'] == '小蒸锅'
+    page.locator('.appliance-open').first.click()
+    assert page.locator('#applianceIcon').input_value() == '🍲'
+    page.locator('#applianceCapacity').select_option('2')
+    page.locator('#saveAppliance').click()
+    assert page.locator('.capacity-conflict').count() == 0
+    # Four concurrent distinct dishes exceed every finite option.
+    data = plan(page)
+    data['tasks'] = [{**template, 'id': f'b{i}', 'start': '12:00', 'end': '12:30', 'dishId': data['dishes'][i]['id'], 'dish': data['dishes'][i]['name'], 'appliances': [tool['id']]} for i in range(4)]
+    page.evaluate('([k,v]) => localStorage.setItem(k, JSON.stringify(v))', [KEY, data])
+    page.reload()
+    for limit in ('3', '2', '1', '0'):
+        page.locator('.appliance-open').first.click()
+        page.locator('#applianceCapacity').select_option(limit)
+        page.locator('#saveAppliance').click()
+        assert page.locator('.capacity-conflict').count() == (0 if limit == '0' else 4)
+    page.locator('.appliance-open').first.focus()
+    page.keyboard.press('Enter')
+    assert page.locator('#applianceDialog').evaluate('(d) => d.open')
+    page.locator('#applianceDialog [data-close-dialog]').first.click()
+    # New tools default to unlimited, independent of the last edited tool.
+    page.locator('#addAppliance').click()
+    assert page.locator('#applianceId').input_value() == ''
+    assert page.locator('#applianceCapacity').input_value() == '0'
+    page.locator('#saveAppliance').click()
+    assert plan(page)['appliances'][-1]['capacity'] == 0
+    assert not errors, errors
+    context.close()
+    print('PASS: mobile menu/settings locations, appliance editing and capacity persistence, all limits, distinct dishes and exclusive interval endpoints')
+
+
 def run():
     server = ThreadingHTTPServer(('127.0.0.1', 0), partial(QuietHandler, directory=str(ROOT)))
     Thread(target=server.serve_forever, daemon=True).start()
@@ -211,12 +274,15 @@ def run():
             a, b = [cards.nth(i).bounding_box() for i in range(2)]
             assert a['x'] + a['width'] <= b['x'] or b['x'] + b['width'] <= a['x']
             # Blank names and multiple appliances, edit, completion and persistence.
-            page.locator('#addTaskTop').click()
+            page.locator('#manageMenu').click()
+            page.locator('#addDish').click()
+            page.locator('#addDishTask').click()
             page.locator('#taskStart').fill('19:00')
             page.locator('#taskEnd').fill('19:30')
             page.locator('#applianceChecks input').nth(0).check()
             page.locator('#applianceChecks input').nth(1).check()
             page.locator('#saveTask').click()
+            page.locator('#menuDialog [data-close-dialog]').click()
             data = plan(page)
             new_id = data['tasks'][-1]['id']
             assert data['tasks'][-1]['name'] == data['tasks'][-1]['dish'] == ''
@@ -257,7 +323,8 @@ def run():
             # Removing every appliance keeps steps available, and blank appliances can be added.
             page.on('dialog', lambda d: d.accept())
             for _ in range(4):
-                page.locator('.delete-appliance').first.click()
+                page.locator('.appliance-open').first.click()
+                page.locator('#deleteAppliance').click()
             assert len(plan(page)['appliances']) == 0
             open_step(page, new_id)
             page.locator('#deleteTask').click()
@@ -327,6 +394,7 @@ def run():
             assert not errors, errors
             context.close()
             test_menu(browser, url, errors)
+            test_appliance_capacity(browser, url, errors)
             browser.close()
             print('PASS: mobile layout and real touch resizing; no JavaScript errors')
     finally:

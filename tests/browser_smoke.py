@@ -57,6 +57,114 @@ def resize_column(page, delta):
     page.mouse.up()
 
 
+def open_step(page, task_id):
+    page.locator('#manageMenu').click()
+    dish_id = next(t for t in plan(page)['tasks'] if t['id'] == task_id)['dishId']
+    page.locator(f'[data-open-dish="{dish_id}"]').click()
+    page.locator(f'[data-edit-task="{task_id}"]').click()
+
+
+def test_menu(browser, url, errors):
+    context = browser.new_context(viewport={'width': 375, 'height': 812}, is_mobile=True, has_touch=True)
+    page = context.new_page()
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    page.on('dialog', lambda d: d.accept())
+    page.goto(url)
+    # Legacy plans migrate without losing task names, timing or completion.
+    page.locator('.task-card .check').first.click()
+    original = plan(page)
+    legacy = dict(original)
+    legacy.pop('dishes')
+    legacy['tasks'] = [{k: v for k, v in task.items() if k != 'dishId'} for task in original['tasks']]
+    page.evaluate('([k,v]) => localStorage.setItem(k, JSON.stringify(v))', [KEY, legacy])
+    page.reload()
+    page.locator('#manageMenu').click()
+    assert page.locator('[data-open-dish]').count() == 5
+    assert page.locator('[data-edit-task]').count() == 0
+    page.locator('[data-open-dish]').first.click()
+    assert page.locator('[data-edit-task]').count() == 2
+    # A keyboard/viewport resize must not erase an unfinished name draft.
+    page.locator('#dishName').fill('瑞典炖菜 <测试>')
+    page.locator('#menuTitle').click()
+    page.set_viewport_size({'width': 390, 'height': 700})
+    assert page.locator('#dishName').input_value() == '瑞典炖菜 <测试>'
+    page.locator('#dishForm button').click()
+    dish_id = plan(page)['dishes'][0]['id']
+    assert all(t['dish'] == '瑞典炖菜 <测试>' for t in plan(page)['tasks'] if t['dishId'] == dish_id)
+    assert page.locator('#menuTitle').inner_text() == '瑞典炖菜 <测试>'
+    assert [(t['start'], t['end'], t['done']) for t in original['tasks']] == [(t['start'], t['end'], t['done']) for t in plan(page)['tasks']]
+    # A nested editor returns to the dish on Escape, cancel and save.
+    page.locator('#addDishTask').click()
+    assert page.locator('#taskDish').input_value() == dish_id
+    assert page.locator('#taskStart').input_value() == '12:00'
+    page.keyboard.press('Escape')
+    assert page.locator('#menuDialog').evaluate('(d) => d.open')
+    assert not page.locator('#taskDialog').evaluate('(d) => d.open')
+    page.locator('#addDishTask').click()
+    box = page.locator('#taskDialog').bounding_box()
+    page.mouse.click(box['x'] + 3, box['y'] + 3)
+    assert page.locator('#taskDialog').evaluate('(d) => d.open')
+    page.locator('#taskStart').fill('13:00')
+    page.locator('#taskEnd').fill('12:00')
+    page.locator('#saveTask').click()
+    assert page.locator('#taskError').inner_text()
+    assert len(plan(page)['tasks']) == 8
+    page.locator('#taskEnd').fill('13:30')
+    page.locator('#saveTask').click()
+    assert page.locator('[data-edit-task]').count() == 3
+    new_task = plan(page)['tasks'][-1]
+    assert new_task['dishId'] == dish_id
+    assert new_task['appliances'] == []
+    page.locator(f'[data-toggle-step="{new_task['id']}"]').click()
+    assert plan(page)['tasks'][-1]['done']
+    # Moving a step updates its association without duplicating or deleting it.
+    page.locator(f'[data-edit-task="{new_task['id']}"]').click()
+    other = plan(page)['dishes'][1]['id']
+    page.locator('#taskDish').select_option(other)
+    page.locator('#saveTask').click()
+    assert plan(page)['tasks'][-1]['dishId'] == other
+    assert page.locator('#dishName').input_value() == plan(page)['dishes'][1]['name']
+    page.locator('#menuBack').click()
+    # Empty and unnamed dishes are separate, persistent objects.
+    for _ in range(2):
+        page.locator('#addDish').click()
+        assert page.locator('[data-edit-task]').count() == 0
+        page.locator('#menuBack').click()
+    assert len(plan(page)['dishes']) == 7
+    page.reload()
+    page.locator('#manageMenu').click()
+    assert page.locator('[data-open-dish]').count() == 7
+    page.locator('[data-open-dish]').last.click()
+    page.locator('#deleteDish').click()
+    assert len(plan(page)['dishes']) == 6
+    assert len(plan(page)['tasks']) == 9
+    page.locator(f'[data-open-dish="{dish_id}"]').click()
+    page.locator('#deleteDish').click()
+    assert all(t['dishId'] != dish_id for t in plan(page)['tasks'])
+    assert len(plan(page)['tasks']) == 7
+    page.locator('#menuDialog [data-close-dialog]').click()
+    # Add tools at the end of the appliance headings; newly added tools scroll into view.
+    last = page.locator('.appliance-head').last.bounding_box()
+    add = page.locator('#addAppliance').bounding_box()
+    assert add['x'] >= last['x'] + last['width']
+    page.locator('#addAppliance').click()
+    page.locator('#applianceName').fill('新蒸箱')
+    page.locator('#applianceForm button[type="submit"]').click()
+    assert page.locator('.appliance-head').last.inner_text().startswith('◉')
+    new = page.locator('.appliance-head').last.bounding_box()
+    wrap = page.locator('.planner-wrap').bounding_box()
+    assert new['x'] + new['width'] <= wrap['x'] + wrap['width'] + 1
+    page.set_viewport_size({'width': 1280, 'height': 1000})
+    page.locator('#resetDemo').click()
+    page.reload()
+    page.locator('#manageMenu').click()
+    assert page.locator('[data-open-dish]').count() == 5
+    assert page.locator('.task-card').count() == 9
+    assert not errors, errors
+    context.close()
+    print('PASS: dish-first menu, legacy migration, rename, empty/unnamed dishes, step ownership, nested dialogs, keyboard resize and trailing appliance control')
+
+
 def run():
     server = ThreadingHTTPServer(('127.0.0.1', 0), partial(QuietHandler, directory=str(ROOT)))
     Thread(target=server.serve_forever, daemon=True).start()
@@ -72,7 +180,8 @@ def run():
                 response = page.request.get(url + asset)
                 assert response.ok and len(response.body()) > 100
             page.goto(url)
-            assert page.title() == '宴席厨房排程'
+            assert page.title() == 'Min Chef（敏捷厨师）'
+            assert page.locator('h1, h2').count() == 1
             assert page.locator('.appliance-head').count() == 4
             assert page.locator('.task-card').count() == 9
             assert page.locator('.timeline-corner').inner_text() == ''
@@ -139,20 +248,21 @@ def run():
             assert page.locator('#timelineError').inner_text()
             assert page.locator('#timelineDialog').evaluate('(d) => d.open')
             page.locator('#timelineDialog [data-close-dialog]').first.click()
-            page.locator('#manageMenu').click()
-            page.locator(f'[data-edit-task="{new_id}"]').click()
+            open_step(page, new_id)
             page.locator('#taskName').fill('改名')
             page.locator('#saveTask').click()
             assert plan(page)['tasks'][-1]['name'] == '改名'
+            assert page.locator('#menuDialog').evaluate('(d) => d.open')
+            page.locator('#menuDialog [data-close-dialog]').click()
             # Removing every appliance keeps steps available, and blank appliances can be added.
             page.on('dialog', lambda d: d.accept())
             for _ in range(4):
                 page.locator('.delete-appliance').first.click()
             assert len(plan(page)['appliances']) == 0
-            page.locator('#manageMenu').click()
-            page.locator(f'[data-edit-task="{new_id}"]').click()
+            open_step(page, new_id)
             page.locator('#deleteTask').click()
             assert len(plan(page)['tasks']) == 8
+            page.locator('#menuDialog [data-close-dialog]').click()
             page.locator('#addAppliance').click()
             page.locator('#applianceForm button[type="submit"]').click()
             assert plan(page)['appliances'][0]['name'] == ''
@@ -216,6 +326,7 @@ def run():
             assert mobile.evaluate('document.documentElement.scrollWidth <= innerWidth')
             assert not errors, errors
             context.close()
+            test_menu(browser, url, errors)
             browser.close()
             print('PASS: mobile layout and real touch resizing; no JavaScript errors')
     finally:

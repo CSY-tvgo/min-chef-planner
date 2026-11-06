@@ -4,16 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f6f7f2" />
-    <title>宴席厨房排程</title>
+    <title>Min Chef（敏捷厨师）</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="app-shell">
       <header class="topbar">
         <div class="brand">
-          <div class="brand-mark">◎</div>
           <div>
-            <h1>宴席厨房排程</h1>
+            <h1>Min Chef <span>敏捷厨师</span></h1>
           </div>
         </div>
         <div class="top-actions">
@@ -25,9 +24,6 @@
 
       <main>
         <section class="intro">
-          <div>
-            <h2>宴席排程</h2>
-          </div>
           <div class="summary" id="summary"></div>
         </section>
 
@@ -38,7 +34,6 @@
             <button class="filter" data-filter="done" type="button">已完成</button>
           </div>
           <div class="toolbar-group">
-            <button class="button button-outline" id="addAppliance" type="button">＋ 器具</button>
             <button class="button button-outline" id="setTimelineStart" type="button">时间范围</button>
             <button class="button button-outline" id="manageMenu" type="button">☷ 菜单</button>
           </div>
@@ -67,14 +62,14 @@
         </div>
         <input type="hidden" id="taskId" />
         <label>步骤名称<input id="taskName" placeholder="可不填" /></label>
-        <label>所属菜品<input id="taskDish" placeholder="可不填" /></label>
+        <label>所属菜品<select id="taskDish"></select></label><label id="newDishLabel">新菜品名称<input id="taskNewDish" placeholder="可不填" /></label>
         <div class="form-grid">
           <label>开始时间<input id="taskStart" type="time" required /></label>
           <label>结束时间<input id="taskEnd" type="time" required /></label>
         </div>
-        <label>使用器具 <span class="label-note">可多选</span><div class="check-list" id="applianceChecks"></div></label>
+        <div class="appliance-field"><span>使用器具 · 可多选</span><div class="check-list" id="applianceChecks"></div></div>
         <label>备注（可选）<textarea id="taskNote" rows="2" placeholder="例如：水开后计时 8 分钟"></textarea></label>
-        <div class="modal-actions"><button class="button button-danger" id="deleteTask" type="button" hidden>删除步骤</button><button class="button button-quiet" type="button" data-close-dialog="taskDialog">取消</button><button class="button button-primary" id="saveTask" type="submit">保存步骤</button></div>
+        <p id="taskError" role="alert" class="save-error"></p><div class="modal-actions"><button class="button button-danger" id="deleteTask" type="button" hidden>删除步骤</button><button class="button button-quiet" type="button" data-close-dialog="taskDialog">取消</button><button class="button button-primary" id="saveTask" type="submit">保存步骤</button></div>
       </form>
     </dialog>
 
@@ -97,7 +92,10 @@
     </dialog>
 
     <dialog id="menuDialog" class="modal menu-modal">
-      <div class="modal-head"><div><p class="eyebrow accent">菜单</p><h3>菜单</h3></div><button class="icon-button" type="button" data-close-dialog="menuDialog" aria-label="关闭">×</button></div><div id="menuList" class="menu-list"></div><div class="modal-actions"><button class="button button-primary" type="button" data-close-dialog="menuDialog">完成</button></div>
+      <div class="modal-head"><div class="menu-heading"><button type="button" id="menuBack" class="button button-quiet" hidden>‹ 菜单</button><h3 id="menuTitle">菜单</h3></div><button class="icon-button" type="button" data-close-dialog="menuDialog" aria-label="关闭">×</button></div>
+      <form id="dishForm" hidden><label>菜品名称<input id="dishName" placeholder="可不填" /></label><button class="button button-outline" type="submit">保存名称</button></form>
+      <div id="menuList" class="menu-list"></div>
+      <div class="modal-actions"><button id="deleteDish" class="button button-danger" type="button" hidden>删除菜品</button><button id="addDish" class="button button-primary" type="button">＋ 菜品</button><button id="addDishTask" class="button button-primary" type="button" hidden>＋ 步骤</button></div>
     </dialog>
     <script src="app.js"></script>
   </body>

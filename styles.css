@@ -101,3 +101,38 @@ button { cursor: pointer; }
 .task-card.short .move-handle { top: 7px; bottom: auto; height: max(0px, calc(100% - 14px)); width: 14px; right: 0; font-size: 12px; }
 .task-card.short strong { padding-right: 12px; }
 .now-line span { left: -26px; font-size: 7px; }
+
+/* One compact identity; dishes are the entry point to their steps. */
+.topbar { margin-bottom: 16px; }
+.brand h1 { font-size: 21px; white-space: nowrap; }
+.brand h1 span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; font-weight: 400; letter-spacing: 0; }
+.intro { margin-bottom: 16px; }
+.summary { margin-top: 0; gap: 24px; }
+.stat strong { font-size: 23px; }
+.add-appliance-cell { flex: 0 0 48px; display: grid; place-items: center; }
+#addAppliance { width: 36px; height: 40px; padding: 0; border: 1px dashed var(--line); border-radius: 5px; background: var(--paper); color: var(--green); font-size: 24px; }
+.menu-heading { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.menu-heading h3 { overflow-wrap: anywhere; }
+.menu-heading .button { white-space: nowrap; }
+.menu-list { max-height: min(50dvh, 420px); }
+.menu-item strong { overflow-wrap: anywhere; }
+.menu-item span { font-size: 10px; }
+.step-row { display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--line); }
+.step-check { flex: 0 0 36px; height: 42px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 21px; }
+.step-check.done { color: var(--green); }
+.step-edit { flex: 1; min-width: 0; text-align: left; padding: 12px 0; border: 0; background: transparent; color: var(--ink); }
+.step-edit strong, .step-edit span { display: block; overflow-wrap: anywhere; }
+.step-edit strong { font-size: 13px; }
+.step-edit span { margin-top: 5px; font-size: 11px; color: var(--muted); }
+#dishForm { display: flex; align-items: end; gap: 8px; margin-bottom: 12px; }
+#dishForm label { flex: 1; min-width: 0; margin: 0; }
+#dishForm button { white-space: nowrap; }
+.empty-state, .appliance-field { color: var(--muted); font-size: 12px; }
+.appliance-field { margin: 15px 0; }
+button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+@media (max-width: 650px) {
+  .topbar { align-items: center; }
+  .top-actions { gap: 8px; }
+  .top-actions .save-state { max-width: 84px; }
+  .summary { gap: 24px; }
+}

@@ -28,6 +28,15 @@ function validState(value) {
     if (!a || typeof a.id !== "string" || ids.has(a.id) || typeof a.name !== "string" || typeof a.icon !== "string" || (a.width !== undefined && (!Number.isFinite(a.width) || a.width < MIN_COLUMN_WIDTH || a.width > MAX_COLUMN_WIDTH))) return false;
     ids.add(a.id);
   }
+  if (value.dishes !== undefined) {
+    if (!Array.isArray(value.dishes)) return false;
+    const dishes = new Set();
+    for (const d of value.dishes) {
+      if (!d || typeof d.id !== "string" || typeof d.name !== "string" || dishes.has(d.id)) return false;
+      dishes.add(d.id);
+    }
+    if (!value.tasks.every(t => t && dishes.has(t.dishId))) return false;
+  }
   const tasks = new Set();
   return value.tasks.every(t => {
     if (!t || typeof t.id !== "string" || tasks.has(t.id) || !validTime(t.start) || !validTime(t.end) || minutes(t.end) <= minutes(t.start) || !Array.isArray(t.appliances) || !t.appliances.every(id => ids.has(id)) || typeof t.name !== "string" || typeof t.dish !== "string" || typeof t.note !== "string" || typeof t.done !== "boolean") return false;
@@ -48,6 +57,20 @@ state.timelineStart ||= "10:00";
 if (!state.timelineEnd && state.timelineStart === "23:59") state.timelineStart = "23:58";
 // Old plans did not have an explicit end: retain their visible tasks on migration.
 state.timelineEnd ||= addMinutes("00:00", Math.min(1439, Math.max(minutes(state.timelineStart) + 60, 17 * 60, ...state.tasks.map(t => minutes(t.end)))));
+// Keep the original storage key and migrate named step groups to stable dish IDs.
+if (!state.dishes) {
+  state.dishes = [];
+  const byName = new Map();
+  state.tasks.forEach(task => {
+    if (!byName.has(task.dish)) {
+      const dish = { id: `d${crypto.randomUUID()}`, name: task.dish };
+      byName.set(task.dish, dish);
+      state.dishes.push(dish);
+    }
+    task.dishId = byName.get(task.dish).id;
+  });
+}
+let selectedDishId = null;
 let filter = "all";
 let suppressClickUntil = 0;
 let timelineDuration = 0;
@@ -111,8 +134,9 @@ function render() {
   const layouts = state.appliances.map(a => layoutTasks(visible.filter(t => t.appliances.includes(a.id))));
   const defaultWidth = Math.max(MIN_COLUMN_WIDTH, (document.querySelector(".planner-wrap").clientWidth - 28) / 4);
   const widths = state.appliances.map(a => a.width || defaultWidth);
-  $("planner").style.width = `calc(var(--sidebar) + ${widths.reduce((a, b) => a + b, 0)}px)`;
-  $("applianceHeads").innerHTML = state.appliances.map((a, i) => `<div class="appliance-head" style="flex-basis:${widths[i]}px"><span class="tool-icon">${esc(a.icon)}</span><strong>${esc(display(a.name, "未命名器具"))}</strong><small>${state.tasks.filter(t => t.appliances.includes(a.id)).length} 个步骤</small><button class="delete-appliance" data-delete-appliance="${esc(a.id)}" aria-label="删除${esc(display(a.name, "未命名器具"))}">×</button><span class="column-resize" data-resize-appliance="${esc(a.id)}" role="separator" tabindex="0" aria-label="调整${esc(display(a.name, "未命名器具"))}列宽" aria-orientation="vertical" aria-valuemin="${MIN_COLUMN_WIDTH}" aria-valuemax="${MAX_COLUMN_WIDTH}" aria-valuenow="${Math.round(widths[i])}"></span></div>`).join("");
+  $("planner").style.width = `calc(var(--sidebar) + ${widths.reduce((a, b) => a + b, 0) + 48}px)`;
+  $("applianceHeads").innerHTML = state.appliances.map((a, i) => `<div class="appliance-head" data-appliance-id="${esc(a.id)}" style="flex-basis:${widths[i]}px"><span class="tool-icon">${esc(a.icon)}</span><strong>${esc(display(a.name, "未命名器具"))}</strong><small>${state.tasks.filter(t => t.appliances.includes(a.id)).length} 个步骤</small><button class="delete-appliance" data-delete-appliance="${esc(a.id)}" aria-label="删除${esc(display(a.name, "未命名器具"))}">×</button><span class="column-resize" data-resize-appliance="${esc(a.id)}" role="separator" tabindex="0" aria-label="调整${esc(display(a.name, "未命名器具"))}列宽" aria-orientation="vertical" aria-valuemin="${MIN_COLUMN_WIDTH}" aria-valuemax="${MAX_COLUMN_WIDTH}" aria-valuenow="${Math.round(widths[i])}"></span></div>`).join("") + '<div class="add-appliance-cell"><button id="addAppliance" type="button" aria-label="添加器具" title="添加器具">＋</button></div>';
+  $("addAppliance").onclick = () => $("applianceDialog").showModal();
   const firstHour = Math.ceil(start / 60) * 60;
   $("timeAxis").innerHTML = Array.from({ length: Math.max(0, Math.ceil((end - firstHour) / 60)) }, (_, index) => {
     const time = firstHour + index * 60;
@@ -120,10 +144,8 @@ function render() {
   }).join("");
   $("lanes").style.backgroundPositionY = `${(firstHour - start) / 60 * hourHeight}px`;
   $("lanes").innerHTML = state.appliances.map((a, i) => `<div class="lane" style="flex-basis:${widths[i]}px">${visible.filter(t => t.appliances.includes(a.id)).map(t => taskCard(t, layouts[i])).join("")}</div>`).join("");
-  const dishes = new Set(state.tasks.map(t => display(t.dish, "未命名菜品")));
-  $("summary").innerHTML = `<div class="stat"><strong>${dishes.size}</strong><span>道菜品</span></div><div class="stat"><strong>${state.appliances.length}</strong><span>件器具</span></div><div class="stat"><strong>${state.tasks.filter(t => t.done).length}/${state.tasks.length}</strong><span>步骤完成</span></div>`;
-  $("menuList").innerHTML = state.tasks.map(t => `<button type="button" class="menu-item" data-edit-task="${esc(t.id)}"><strong>${esc(display(t.dish, "未命名菜品"))} · ${esc(display(t.name, "未命名步骤"))}</strong><span>${t.start}–${t.end}${t.appliances.length ? "" : " · 未分配器具"}</span></button>`).join("") || "暂无步骤";
-  document.querySelectorAll("[data-edit-task]").forEach(b => b.onclick = () => { closeDialog("menuDialog"); openTask(b.dataset.editTask); });
+  $("summary").innerHTML = `<div class="stat"><strong>${state.dishes.length}</strong><span>道菜品</span></div><div class="stat"><strong>${state.appliances.length}</strong><span>件器具</span></div><div class="stat"><strong>${state.tasks.filter(t => t.done).length}/${state.tasks.length}</strong><span>步骤完成</span></div>`;
+  renderMenu();
   document.querySelectorAll("[data-delete-appliance]").forEach(b => b.onclick = () => deleteAppliance(b.dataset.deleteAppliance));
   document.querySelectorAll(".task-card").forEach(card => {
     card.onclick = (event) => { if (Date.now() > suppressClickUntil && !event.target.closest(".resize-handle, .move-handle")) openTask(card.dataset.id); };
@@ -241,11 +263,59 @@ function startColumnResize(event) {
   document.addEventListener("pointerup", finish);
   document.addEventListener("pointercancel", finish);
 }
-function openTask(id = "") {
+function renderMenu() {
+  const dish = state.dishes.find(d => d.id === selectedDishId);
+  if (!dish) selectedDishId = null;
+  $("menuTitle").textContent = dish ? display(dish.name, "未命名菜品") : "菜单";
+  for (const id of ["menuBack", "dishForm", "deleteDish", "addDishTask"]) $(id).hidden = !dish;
+  $("addDish").hidden = Boolean(dish);
+  if (dish) {
+    // Keep a name draft through viewport/keyboard changes, even after blur.
+    if ($("dishName").dataset.editing !== dish.id) {
+      $("dishName").value = dish.name;
+      $("dishName").dataset.editing = dish.id;
+    }
+    const tasks = state.tasks.filter(t => t.dishId === dish.id).sort((a, b) => minutes(a.start) - minutes(b.start));
+    $("menuList").innerHTML = tasks.map(t => {
+      const tools = t.appliances.map(id => display(state.appliances.find(a => a.id === id)?.name, "未命名器具")).join("、") || "未分配器具";
+      return `<div class="step-row"><button type="button" class="step-check ${t.done ? "done" : ""}" data-toggle-step="${esc(t.id)}" aria-label="${t.done ? "标为待处理" : "标为完成"}" aria-pressed="${t.done}">${t.done ? "✓" : "○"}</button><button type="button" class="step-edit" data-edit-task="${esc(t.id)}"><strong>${esc(display(t.name, "未命名步骤"))}</strong><span>${t.start}–${t.end} · ${esc(tools)}</span></button></div>`;
+    }).join("") || '<p class="empty-state">还没有步骤，点下方添加。</p>';
+    document.querySelectorAll("[data-edit-task]").forEach(b => b.onclick = () => openTask(b.dataset.editTask));
+    document.querySelectorAll("[data-toggle-step]").forEach(b => b.onclick = () => {
+      const task = state.tasks.find(t => t.id === b.dataset.toggleStep);
+      task.done = !task.done; save(); render();
+      document.querySelectorAll("[data-toggle-step]").forEach(next => { if (next.dataset.toggleStep === task.id) next.focus(); });
+    });
+  } else {
+    delete $("dishName").dataset.editing;
+    $("menuList").innerHTML = state.dishes.map(d => {
+      const tasks = state.tasks.filter(t => t.dishId === d.id);
+      return `<button type="button" class="menu-item" data-open-dish="${esc(d.id)}"><strong>${esc(display(d.name, "未命名菜品"))}</strong><span>${tasks.filter(t => t.done).length}/${tasks.length} 步骤完成 ›</span></button>`;
+    }).join("") || '<p class="empty-state">还没有菜品，点下方添加。</p>';
+    document.querySelectorAll("[data-open-dish]").forEach(b => b.onclick = () => { selectedDishId = b.dataset.openDish; renderMenu(); });
+  }
+}
+function openMenu() {
+  selectedDishId = null;
+  renderMenu();
+  $("menuDialog").showModal();
+}
+function openTask(id = "", dishId = "") {
   const task = state.tasks.find(t => t.id === id);
-  $("taskDialogTitle").textContent = task ? "编辑烹饪步骤" : "添加烹饪步骤";
-  $("taskId").value = id; $("taskName").value = task?.name || ""; $("taskDish").value = task?.dish || ""; $("taskStart").value = task?.start || state.timelineStart; $("taskEnd").value = task?.end || addMinutes("00:00", Math.min(1439, minutes(state.timelineStart) + 60)); $("taskNote").value = task?.note || "";
-  $("applianceChecks").innerHTML = state.appliances.map(a => `<label class="check-item"><input type="checkbox" value="${esc(a.id)}" ${task?.appliances.includes(a.id) ? "checked" : ""}>${esc(a.icon)} ${esc(display(a.name, "未命名器具"))}</label>`).join("");
+  const previous = state.tasks.filter(t => t.dishId === dishId).sort((a, b) => minutes(b.end) - minutes(a.end))[0];
+  const start = Math.min(1438, previous ? minutes(previous.end) : minutes(state.timelineStart));
+  $("taskDialogTitle").textContent = task ? "编辑步骤" : "添加步骤";
+  $("taskId").value = id;
+  $("taskName").value = task?.name || "";
+  $("taskDish").innerHTML = state.dishes.map(d => `<option value="${esc(d.id)}">${esc(display(d.name, "未命名菜品"))}</option>`).join("") + '<option value="__new__">＋ 新菜品</option>';
+  $("taskDish").value = task?.dishId || dishId || "__new__";
+  $("newDishLabel").hidden = $("taskDish").value !== "__new__";
+  $("taskNewDish").value = "";
+  $("taskStart").value = task?.start || addMinutes("00:00", start);
+  $("taskEnd").value = task?.end || addMinutes("00:00", Math.min(1439, start + 30));
+  $("taskNote").value = task?.note || "";
+  $("taskError").textContent = "";
+  $("applianceChecks").innerHTML = state.appliances.map(a => `<label class="check-item"><input type="checkbox" value="${esc(a.id)}" ${task?.appliances.includes(a.id) ? "checked" : ""}>${esc(a.icon)} ${esc(display(a.name, "未命名器具"))}</label>`).join("") || '<span class="empty-state">可稍后在时间轴右侧添加器具。</span>';
   $("deleteTask").hidden = !task;
   $("taskDialog").showModal();
 }
@@ -258,20 +328,52 @@ function deleteAppliance(id) {
   state.appliances = state.appliances.filter(a => a.id !== id); state.tasks.forEach(t => t.appliances = t.appliances.filter(a => a !== id)); save(); render();
 }
 document.querySelectorAll(".filter").forEach(b => b.onclick = () => { filter = b.dataset.filter; document.querySelectorAll(".filter").forEach(x => x.classList.toggle("active", x === b)); render(); });
-$("addTaskTop").onclick = () => openTask(); $("addAppliance").onclick = () => $("applianceDialog").showModal(); $("manageMenu").onclick = () => $("menuDialog").showModal();
+$("addTaskTop").onclick = () => openTask();
+$("manageMenu").onclick = openMenu;
+$("taskDish").onchange = () => { $("newDishLabel").hidden = $("taskDish").value !== "__new__"; };
+$("menuBack").onclick = () => { selectedDishId = null; renderMenu(); };
+$("addDish").onclick = () => {
+  const dish = { id: `d${crypto.randomUUID()}`, name: "" };
+  state.dishes.push(dish); selectedDishId = dish.id; save(); render(); $("dishName").focus();
+};
+$("addDishTask").onclick = () => openTask("", selectedDishId);
+$("dishForm").onsubmit = e => {
+  e.preventDefault();
+  const dish = state.dishes.find(d => d.id === selectedDishId);
+  dish.name = $("dishName").value.trim();
+  $("dishName").value = dish.name;
+  state.tasks.filter(t => t.dishId === dish.id).forEach(t => t.dish = dish.name);
+  save(); render();
+};
+$("deleteDish").onclick = () => {
+  if (!confirm("删除这道菜及其所有步骤？")) return;
+  state.tasks = state.tasks.filter(t => t.dishId !== selectedDishId);
+  state.dishes = state.dishes.filter(d => d.id !== selectedDishId);
+  selectedDishId = null; save(); render();
+};
 $("setTimelineStart").onclick = () => { $("timelineStart").value = state.timelineStart; $("timelineEnd").value = state.timelineEnd; $("timelineError").textContent = ""; $("timelineDialog").showModal(); };
 document.querySelectorAll("[data-close-dialog]").forEach(button => button.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); closeDialog(button.dataset.closeDialog); }));
-document.querySelectorAll("dialog").forEach(dialog => dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); }));
+document.querySelectorAll("dialog").forEach(dialog => dialog.addEventListener("click", (e) => { if (e.target !== dialog) return;
+  const box = dialog.getBoundingClientRect();
+  if (e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom) dialog.close(); }));
 $("taskForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const id = $("taskId").value || `t${crypto.randomUUID()}`;
   const name = $("taskName").value.trim();
-  const dish = $("taskDish").value.trim();
+
   const start = $("taskStart").value;
   const end = $("taskEnd").value;
   const appliances = [...$("applianceChecks").querySelectorAll("input:checked")].map(x => x.value);
-  const data = { id, name, dish, start, end, appliances, note: $("taskNote").value.trim(), done: state.tasks.find(t => t.id === id)?.done || false };
-  if (!start || !end || minutes(end) <= minutes(start)) return alert("结束时间必须晚于开始时间。");
+  if (!validTime(start) || !validTime(end) || minutes(end) <= minutes(start)) {
+    $("taskError").textContent = "结束时间必须晚于开始时间"; return;
+  }
+  let dish = state.dishes.find(d => d.id === $("taskDish").value);
+  if (!dish) {
+    const name = $("taskNewDish").value.trim();
+    dish = { id: `d${crypto.randomUUID()}`, name }; state.dishes.push(dish);
+  }
+  const data = { id, name, dish: dish.name, dishId: dish.id, start, end, appliances, note: $("taskNote").value.trim(), done: state.tasks.find(t => t.id === id)?.done || false };
+  if ($("menuDialog").open) selectedDishId = dish.id;
   const index = state.tasks.findIndex(t => t.id === id);
   index >= 0 ? state.tasks.splice(index, 1, data) : state.tasks.push(data);
   closeDialog("taskDialog"); save(); render();
@@ -281,6 +383,7 @@ $("applianceForm").addEventListener("submit", (e) => {
   const name = $("applianceName").value.trim();
   state.appliances.push({ id: `a${crypto.randomUUID()}`, name, icon: $("applianceIcon").value });
   $("applianceForm").reset(); closeDialog("applianceDialog"); save(); render();
+  document.querySelector(".planner-wrap").scrollLeft = $("planner").offsetWidth;
 });
 $("timelineForm").addEventListener("submit", (e) => {
   e.preventDefault();
@@ -298,8 +401,14 @@ $("deleteTask").onclick = () => {
   state.tasks = state.tasks.filter(t => t.id !== $("taskId").value);
   closeDialog("taskDialog"); save(); render();
 };
-$("resetDemo").onclick = () => { if (confirm("恢复示例排程？当前数据会被覆盖。")) { state = structuredClone(demo); state.timelineStart = "10:00"; state.timelineEnd = "17:00"; save(); render(); } };
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") document.querySelectorAll("dialog[open]").forEach(d => d.close()); });
+$("resetDemo").onclick = () => { if (confirm("恢复示例排程？当前数据会被覆盖。")) { state = structuredClone(demo); state.timelineStart = "10:00"; state.timelineEnd = "17:00";
+  state.dishes = [];
+  state.tasks.forEach(t => {
+    let dish = state.dishes.find(d => d.name === t.dish);
+    if (!dish) { dish = { id: `d${crypto.randomUUID()}`, name: t.dish }; state.dishes.push(dish); }
+    t.dishId = dish.id;
+  });
+  selectedDishId = null; save(); render(); } };
 window.addEventListener("resize", render);
 render();
 setInterval(updateNowLine, 30000);

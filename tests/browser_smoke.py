@@ -155,6 +155,8 @@ def test_menu(browser, url, errors):
     wrap = page.locator('.planner-wrap').bounding_box()
     assert new['x'] + new['width'] <= wrap['x'] + wrap['width'] + 1
     page.set_viewport_size({'width': 1280, 'height': 1000})
+    page.locator('#showHelp').click()
+    assert page.locator('#helpDialog #resetDemo').inner_text() == '导入示例'
     page.locator('#resetDemo').click()
     page.reload()
     page.locator('#manageMenu').click()
@@ -860,8 +862,9 @@ def test_unassigned_width_and_help(browser, url, errors):
     page.locator('#showHelp').tap()
     page.wait_for_timeout(350)  # A delayed touch click must not close the new dialog.
     assert page.locator('#helpDialog').evaluate('(d)=>d.open')
-    assert page.locator('#helpDialog .help-list li').count()==5
-    assert len(page.locator('#helpDialog .help-list').inner_text())<220
+    instructions=page.locator('#helpDialog .help-list').inner_text()
+    assert all(word in instructions for word in ['菜单','自动排程','列宽','时长','无器具','步进','曲线'])
+    assert len(instructions)<400
     assert '自动保存' in page.locator('#saveState').inner_text()
     page.screenshot(path='/tmp/minchef-help-dialog.png')
     page.locator('#helpDialog [data-close-dialog]').tap()
@@ -875,6 +878,65 @@ def test_unassigned_width_and_help(browser, url, errors):
     assert not errors,errors
     context.close()
     print('PASS: fixed unassigned column width via mouse/touch/keyboard, cancellation, persistence, help-only instructions and visible save errors')
+
+
+def test_multi_tool_links_and_example(browser, url, errors):
+    context=browser.new_context(viewport={'width':1100,'height':900})
+    page=context.new_page();page.on('pageerror',lambda e:errors.append(str(e)))
+    page.goto(url);page.locator('.task-card .check').first.click()
+    base=plan(page);template=base['tasks'][0]
+    def seed(stages):
+        data={**base,'timelineStart':'10:00','timelineEnd':'13:00','tasks':[
+            {**template,'id':id,'name':name,'start':start,'end':end,'appliances':tools,'done':False}
+            for id,name,start,end,tools in stages]}
+        page.evaluate('([k,v])=>localStorage.setItem(k,JSON.stringify(v))',[KEY,data]);page.reload()
+    seed([('a','','10:00','11:00',['stove','oven']),('b',' ','11:00','11:30',['stove','oven'])])
+    assert page.locator('[data-id="a"] strong').all_text_contents()==[template['dish']]*2
+    assert page.locator('[data-id="b"] strong').all_text_contents()==[template['dish']]*2
+    assert '未命名步骤' not in page.locator('[data-id="a"]').first.get_attribute('title')
+    paths=page.locator('path[data-kind="sequence"][data-from-id="a"][data-to-id="b"]')
+    assert paths.count()==2
+    assert paths.evaluate_all('(ps)=>ps.every(p=>p.dataset.fromLane===p.dataset.toLane)')
+    assert page.locator('path[data-kind="completion"]').count()==0 # Adjacent intervals are sequential.
+    seed([('a','多器具','10:00','11:00',['stove','oven']),('b','交错占用','10:30','11:30',['stove','oven'])])
+    assert page.locator('path[data-kind="completion"]').count()==0 # No crossovers between shared lanes.
+    seed([('a','长占用','10:00','12:00',['stove','oven']),('b','同列中间步骤','10:15','11:45',['stove']),('c','同列短步骤','10:30','11:00',['stove'])])
+    assert page.locator('path[data-kind="completion"][data-from-id="c"][data-to-id="a"][data-to-lane="oven"]').count()==1
+    assert page.locator('path[data-kind="completion"][data-from-id="c"][data-to-id="b"]').count()==0
+    # Staggered overlapping intervals join at real ends, through the next finishing tool.
+    seed([('a','开始','10:00','11:00',['stove']),('b','稍后结束','10:30','11:30',['oven']),('c','中间结束','10:45','11:10',['rice'])])
+    assert page.locator('path[data-kind="completion"][data-from-id="a"][data-to-id="c"]').count()==1
+    assert page.locator('path[data-kind="completion"][data-from-id="c"][data-to-id="b"]').count()==1
+    assert page.locator('path[data-kind="completion"][data-from-id="a"][data-to-id="b"]').count()==0
+    data=plan(page);data['tasks'][2]['done']=True
+    page.evaluate('([k,v])=>localStorage.setItem(k,JSON.stringify(v))',[KEY,data]);page.reload()
+    page.locator('[data-filter="todo"]').click()
+    assert page.locator('path[data-kind="completion"]').count()==0 # No shortcut over hidden c.
+    page.locator('[data-filter="all"]').click();set_range(page,'10:00','11:05')
+    assert page.locator('path[data-kind="completion"]').count()==0 # No clipped-end joins.
+    set_range(page,'10:00','13:00');page.set_viewport_size({'width':375,'height':812})
+    page.screenshot(path='/tmp/minchef-staggered-tools.png')
+    # Example import lives in help; cancellation and failed persistence preserve both copies.
+    assert page.locator('.top-actions #resetDemo').count()==0
+    page.locator('[data-filter="done"]').click();page.locator('#showHelp').click()
+    assert page.locator('#helpDialog #resetDemo').inner_text()=='导入示例'
+    before=plan(page);memory=page.evaluate('JSON.stringify(state)')
+    page.once('dialog',lambda d:d.dismiss());page.locator('#resetDemo').click()
+    assert plan(page)==before and page.evaluate('JSON.stringify(state)')==memory
+    page.evaluate('()=>{window.originalSet=Storage.prototype.setItem;Storage.prototype.setItem=()=>{throw new Error("Quota")}}')
+    page.once('dialog',lambda d:d.accept());page.locator('#resetDemo').click()
+    assert '当前排程未更改' in page.locator('#saveState').inner_text()
+    assert plan(page)==before and page.evaluate('JSON.stringify(state)')==memory
+    page.evaluate('()=>{Storage.prototype.setItem=window.originalSet}')
+    page.once('dialog',lambda d:d.accept());page.locator('#resetDemo').click()
+    assert not page.locator('#helpDialog').evaluate('(d)=>d.open')
+    assert page.locator('[data-filter="all"]').evaluate('(b)=>b.classList.contains("active")')
+    assert page.locator('.task-card').count()==9
+    assert len(plan(page)['tasks'])==8 and '失败' not in page.locator('#saveState').inner_text()
+    page.reload();assert len(plan(page)['tasks'])==8
+    assert not errors,errors
+    context.close()
+    print('PASS: dish-name fallback, shared/staggered multi-tool edges, hidden/clipped intermediates and atomic example import from help')
 
 
 def test_duration_scheduling(browser, url, errors):
@@ -1218,6 +1280,7 @@ def run():
             test_mobile_compatibility(browser, url, errors)
             test_completion_links_and_compact_layout(browser, url, errors)
             test_unassigned_width_and_help(browser, url, errors)
+            test_multi_tool_links_and_example(browser, url, errors)
             test_duration_scheduling(browser, url, errors)
             test_empty_column_and_now(browser, url, errors)
             browser.close()

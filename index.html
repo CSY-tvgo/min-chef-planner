@@ -16,7 +16,6 @@
           </div>
         </div>
         <div class="top-actions">
-          <button class="button button-quiet" id="resetDemo" type="button">恢复示例</button>
           <button class="button button-primary" id="manageMenu" type="button">☷ 菜单</button>
         </div>
       </header>
@@ -114,13 +113,15 @@
     <dialog id="helpDialog" class="modal">
       <div class="modal-head"><h3>使用说明</h3><button class="icon-button" type="button" data-close-dialog="helpDialog" aria-label="关闭">×</button></div>
       <ul class="help-list">
-        <li>菜单：管理菜品、步骤，导入或导出排程。</li>
-        <li>表头：左右拖动排序，拖右边缘调宽。“无器具”列固定在最左。</li>
-        <li>卡片：拖动 ⠿ 调时间，上下边缘改时长，点卡片编辑。</li>
-        <li>齿轮：设置时间范围、比例尺和拖动步进。</li>
-        <li>曲线连接同菜步骤；底部连线表示结束汇合。</li>
+        <li>点“菜单”添加菜品，再点菜品添加步骤；也可导入或导出整份排程。</li>
+        <li>步骤可填写起止时间，或填写分钟数后自动排程。调整其他菜品前会先征求确认。</li>
+        <li>点器具表头修改设置，左右拖动调整顺序，拖右边缘调整列宽。最右侧 ＋ 可添加器具或人员。</li>
+        <li>点卡片编辑；拖动 ⠿ 移动时段，拖上下边缘调整时长，点圆圈标为完成。</li>
+        <li>未选器具或人员的步骤显示在“无器具”列；这一列为空时隐藏，位置固定，宽度可调。</li>
+        <li>齿轮可设置时间范围、每屏小时数和拖动步进。淡曲线连接同菜步骤，底部连线表示占用结束后的汇合；人员不参与连线。</li>
       </ul>
       <p id="saveState" role="status">排程会自动保存在当前浏览器的缓存中。</p>
+      <div class="modal-actions"><button class="button button-outline" id="resetDemo" type="button">导入示例</button></div>
     </dialog>
     <dialog id="scheduleDialog" class="modal">
       <div class="modal-head"><h3>是否需要自动分配时间？</h3><button class="icon-button" type="button" data-close-dialog="scheduleDialog" aria-label="关闭">×</button></div>
@@ -131,6 +132,6 @@
       <div class="modal-actions"><button id="skipSchedule" class="button button-quiet" type="button" data-close-dialog="scheduleDialog">暂不分配</button><button id="findSchedule" class="button button-outline" type="button">查找可用时间</button><button id="applySchedule" class="button button-primary" type="button" hidden>应用该时间</button><button id="applyOptimized" class="button button-outline" type="button" hidden>确认调整并应用</button></div>
     </dialog>
     <script src="vendor/fflate-0.8.2.min.js?v=c3b34f2e9f5e"></script>
-    <script src="app.js?v=419c026d09c6"></script>
+    <script src="app.js?v=097d62696245"></script>
   </body>
 </html>

@@ -258,8 +258,9 @@ function taskCard(task, layout) {
   const { column, count } = layout.get(task.id);
   const index = dishIndex(task);
   const warning = capacityConflicts.has(task.id) ? ` · 占用超限：${[...capacityConflicts.get(task.id)].join("、")}` : "";
-  const title = `${display(task.name, "未命名步骤")} · ${display(task.dish, "未命名菜品")} ${task.start}–${task.end}${warning}`;
-  return `<article class="task-card ${warning ? "capacity-conflict" : ""} ${height < 48 ? "short" : ""} ${task.done ? "done" : ""}" data-id="${esc(task.id)}" title="${esc(title)}" style="top:${top}px;height:${height}px;left:calc(${column / count * 100}% + ${count > 1 ? 1 : 4}px);width:calc(${100 / count}% - ${count > 1 ? 2 : 8}px);background:${COLORS[index % COLORS.length]}"><span class="resize-handle top" data-edge="start" title="拖动调整开始时间"></span><button type="button" class="move-handle" data-edge="move" aria-label="拖动移动步骤">⠿</button><button type="button" class="check" aria-label="${task.done ? "标为待处理" : "标为完成"}">${task.done ? "✓" : ""}</button><strong>${esc(display(task.name, "未命名步骤"))}</strong><small>${task.start}–${task.end} · ${esc(display(task.dish, "未命名菜品"))}${task.note ? ` · ${esc(task.note)}` : ""}${warning ? " · 占用超限" : ""}</small><span class="resize-handle bottom" data-edge="end" title="拖动调整结束时间"></span></article>`;
+  const name = display(task.name.trim(), display(task.dish.trim(), "未命名菜品"));
+  const title = `${name} · ${display(task.dish, "未命名菜品")} ${task.start}–${task.end}${warning}`;
+  return `<article class="task-card ${warning ? "capacity-conflict" : ""} ${height < 48 ? "short" : ""} ${task.done ? "done" : ""}" data-id="${esc(task.id)}" title="${esc(title)}" style="top:${top}px;height:${height}px;left:calc(${column / count * 100}% + ${count > 1 ? 1 : 4}px);width:calc(${100 / count}% - ${count > 1 ? 2 : 8}px);background:${COLORS[index % COLORS.length]}"><span class="resize-handle top" data-edge="start" title="拖动调整开始时间"></span><button type="button" class="move-handle" data-edge="move" aria-label="拖动移动步骤">⠿</button><button type="button" class="check" aria-label="${task.done ? "标为待处理" : "标为完成"}">${task.done ? "✓" : ""}</button><strong>${esc(name)}</strong><small>${task.start}–${task.end} · ${esc(display(task.dish, "未命名菜品"))}${task.note ? ` · ${esc(task.note)}` : ""}${warning ? " · 占用超限" : ""}</small><span class="resize-handle bottom" data-edge="end" title="拖动调整结束时间"></span></article>`;
 }
 // A predecessor must finish before this step starts. Tied latest finishes allow merges.
 // Include hidden tasks when choosing predecessors so filtering never invents shortcuts.
@@ -275,12 +276,15 @@ function renderConnections() {
   });
   const people = new Set(state.appliances.filter(isPerson).map(a => a.id));
   const paths = [];
-  const addConnection = (from, to, kind) => {
+  const addConnection = (from, to, kind, fromLane = null) => {
     const completion = kind === "completion";
     // A clipped bottom is not the actual finish of the step.
     if (completion && (minutes(from.end) > minutes(state.timelineEnd) || minutes(to.end) > minutes(state.timelineEnd))) return;
     for (const source of nodes.get(from.id) || []) for (const target of nodes.get(to.id) || []) {
+      if (fromLane !== null && source.lane !== fromLane) continue;
       if (completion && source.lane === target.lane) continue;
+      // Shared lanes continue vertically; avoid crossing their duplicate cards.
+      if (source.lane !== target.lane && toolLanes(from).includes(target.lane) && toolLanes(to).includes(source.lane)) continue;
       const y1 = source.bottom, y2 = completion ? target.bottom : target.top;
       const bend = Math.max(24, Math.abs(y2 - y1) * .45);
       const arc = Math.abs(source.x - target.x) < 1 ? 16 : 0;
@@ -289,19 +293,23 @@ function renderConnections() {
       paths.push(`<path data-kind="${kind}" data-from-id="${esc(from.id)}" data-to-id="${esc(to.id)}" data-from-lane="${esc(source.lane)}" data-to-lane="${esc(target.lane)}" d="${d}" stroke="${DISH_STROKES[dishIndex(from) % DISH_STROKES.length]}"/>`);
     }
   };
-  const contains = (outer, inner) => outer.id !== inner.id && minutes(outer.start) <= minutes(inner.start) && minutes(outer.end) >= minutes(inner.end)
-    && (outer.start !== inner.start || outer.end !== inner.end);
+  const toolLanes = task => task.appliances.length ? task.appliances.filter(id => !people.has(id)) : ["unassigned"];
+  const continues = (from, to) => from.id !== to.id && minutes(to.start) < minutes(from.end)
+    && (minutes(to.end) > minutes(from.end) || to.end === from.end && minutes(to.start) < minutes(from.start));
   for (const dish of state.dishes) {
     const tasks = state.tasks.filter(t => isScheduled(t) && t.dishId === dish.id && (t.appliances.length === 0 || t.appliances.some(id => !people.has(id)))).sort((a, b) => minutes(a.start) - minutes(b.start));
     for (const to of tasks) {
       const candidates = tasks.filter(from => from.id !== to.id && minutes(from.end) <= minutes(to.start));
       const latestEnd = Math.max(-1, ...candidates.map(from => minutes(from.end)));
       for (const from of candidates.filter(from => minutes(from.end) === latestEnd)) addConnection(from, to, "sequence");
-      // A contained activity finishes into its immediate containing resource interval.
-      // Strict containment prevents cycles; equally timed parallel steps are not containers.
-      const containers = tasks.filter(outer => contains(outer, to));
-      for (const outer of containers.filter(outer => !containers.some(other => contains(outer, other)))) {
-        addConnection(to, outer, "completion");
+      // Each tool finishes into the next still-active tool interval. Choose on
+      // the full plan so hidden intermediates cannot create false shortcuts.
+      for (const lane of toolLanes(to)) {
+        const candidates = tasks.filter(outer => continues(to, outer) && toolLanes(outer).some(id => id !== lane));
+        const nextEnd = Math.min(Infinity, ...candidates.map(outer => minutes(outer.end)));
+        const next = candidates.filter(outer => minutes(outer.end) === nextEnd);
+        const latestStart = Math.max(-1, ...next.map(outer => minutes(outer.start)));
+        for (const outer of next.filter(outer => minutes(outer.start) === latestStart)) addConnection(to, outer, "completion", lane);
       }
     }
   }
@@ -675,14 +683,21 @@ $("deleteTask").onclick = () => {
   state.tasks = state.tasks.filter(t => t.id !== $("taskId").value);
   closeDialog("taskDialog"); save(); render();
 };
-$("resetDemo").onclick = () => { if (confirm("恢复示例排程？当前数据会被覆盖。")) { state = structuredClone(demo); state.timelineStart = "10:00"; state.timelineEnd = "17:00";
-  state.dishes = [];
-  state.tasks.forEach(t => {
-    let dish = state.dishes.find(d => d.name === t.dish);
-    if (!dish) { dish = { id: `d${crypto.randomUUID()}`, name: t.dish }; state.dishes.push(dish); }
+$("resetDemo").onclick = () => {
+  if (!confirm("导入示例会替换当前排程。是否继续？")) return;
+  const next = { ...structuredClone(demo), timelineStart: "10:00", timelineEnd: "17:00", dishes: [] };
+  next.tasks.forEach(t => {
+    let dish = next.dishes.find(d => d.name === t.dish);
+    if (!dish) { dish = { id: `d${crypto.randomUUID()}`, name: t.dish }; next.dishes.push(dish); }
     t.dishId = dish.id;
   });
-  selectedDishId = null; save(); render(); } };
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); }
+  catch { storageWarning = "示例导入失败，当前排程未更改"; updateSaveStatus(); return; }
+  state = next; storageWarning = ""; selectedDishId = null; filter = "all";
+  document.querySelectorAll(".filter").forEach(b => b.classList.toggle("active", b.dataset.filter === "all"));
+  closeDialog("helpDialog"); render();
+  const wrap = document.querySelector(".planner-wrap"); wrap.scrollTop = 0; wrap.scrollLeft = 0;
+};
 // Duration steps remain pending until the user accepts a concrete proposal.
 function scheduleBounds(task, plan) {
   const index = plan.findIndex(t => t.id === task.id);

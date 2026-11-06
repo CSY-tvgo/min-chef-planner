@@ -16,7 +16,6 @@
         <div class="brand">
           <div class="brand-mark">◎</div>
           <div>
-            <p class="eyebrow">HOME BANQUET / 01</p>
             <h1>宴席厨房排程</h1>
           </div>
         </div>
@@ -30,9 +29,7 @@
       <main>
         <section class="intro">
           <div>
-            <p class="eyebrow accent">SATURDAY · 8 PERSONS</p>
-            <h2>把每一道菜，<em>排进厨房的节奏。</em></h2>
-            <p class="intro-copy">以时间为轴、器具为列。拖动思绪之前，先看见整场宴席的流动。</p>
+            <h2>宴席排程</h2>
           </div>
           <div class="summary" id="summary"></div>
         </section>
@@ -52,8 +49,7 @@
         <section class="planner-wrap">
           <div class="planner" id="planner">
             <div class="timeline-corner">
-              <span>TIME / TOOL</span>
-              <small>滚动查看完整排程</small>
+              <span>时间 / 器具</span>
             </div>
             <div class="appliance-heads" id="applianceHeads"></div>
             <div class="timeline-body">
@@ -71,7 +67,7 @@
       <form method="dialog" id="taskForm">
         <div class="modal-head">
           <div><p class="eyebrow accent">NEW / EDIT STEP</p><h3 id="taskDialogTitle">添加烹饪步骤</h3></div>
-          <button class="icon-button" value="cancel" aria-label="关闭">×</button>
+          <button class="icon-button" type="button" data-close-dialog="taskDialog" aria-label="关闭">×</button>
         </div>
         <input type="hidden" id="taskId" />
         <label>步骤名称<input id="taskName" required placeholder="例如：清蒸鲈鱼" /></label>
@@ -82,23 +78,23 @@
         </div>
         <label>使用器具 <span class="label-note">可多选</span><div class="check-list" id="applianceChecks"></div></label>
         <label>备注（可选）<textarea id="taskNote" rows="2" placeholder="例如：水开后计时 8 分钟"></textarea></label>
-        <div class="modal-actions"><button class="button button-quiet" value="cancel">取消</button><button class="button button-primary" id="saveTask" value="default">保存步骤</button></div>
+        <div class="modal-actions"><button class="button button-quiet" type="button" data-close-dialog="taskDialog">取消</button><button class="button button-primary" id="saveTask" type="submit">保存步骤</button></div>
       </form>
     </dialog>
 
     <dialog id="applianceDialog" class="modal">
       <form method="dialog" id="applianceForm">
-        <div class="modal-head"><div><p class="eyebrow accent">KITCHEN TOOL</p><h3>添加器具</h3></div><button class="icon-button" value="cancel" aria-label="关闭">×</button></div>
+        <div class="modal-head"><div><p class="eyebrow accent">KITCHEN TOOL</p><h3>添加器具</h3></div><button class="icon-button" type="button" data-close-dialog="applianceDialog" aria-label="关闭">×</button></div>
         <label>器具名称<input id="applianceName" required placeholder="例如：空气炸锅" /></label>
         <label>图标
           <select id="applianceIcon"><option value="◉">◉ 设备</option><option value="♨">♨ 加热</option><option value="▱">▱ 烤箱</option><option value="◌">◌ 电器</option><option value="⌁">⌁ 手工</option></select>
         </label>
-        <div class="modal-actions"><button class="button button-quiet" value="cancel">取消</button><button class="button button-primary" value="default">添加器具</button></div>
+        <div class="modal-actions"><button class="button button-quiet" type="button" data-close-dialog="applianceDialog">取消</button><button class="button button-primary" type="submit">添加器具</button></div>
       </form>
     </dialog>
 
     <dialog id="menuDialog" class="modal menu-modal">
-      <form method="dialog"><div class="modal-head"><div><p class="eyebrow accent">MENU / DISHES</p><h3>宴席菜单</h3></div><button class="icon-button" value="cancel" aria-label="关闭">×</button></div><div id="menuList" class="menu-list"></div><div class="modal-actions"><button class="button button-primary" value="cancel">完成</button></div></form>
+      <form method="dialog"><div class="modal-head"><div><p class="eyebrow accent">MENU / DISHES</p><h3>菜单</h3></div><button class="icon-button" type="button" data-close-dialog="menuDialog" aria-label="关闭">×</button></div><div id="menuList" class="menu-list"></div><div class="modal-actions"><button class="button button-primary" type="button" data-close-dialog="menuDialog">完成</button></div></form>
     </dialog>
     <script src="app.js"></script>
   </body>

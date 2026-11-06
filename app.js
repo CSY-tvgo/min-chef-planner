@@ -201,6 +201,10 @@ function render() {
   $("planner").style.width = `calc(var(--sidebar) + ${widths.reduce((a, b) => a + b, 0) + unassignedWidth + 48}px)`;
   $("applianceHeads").innerHTML = (showUnassigned ? `<div class="unassigned-head" style="flex-basis:${unassignedWidth}px"><strong>无器具</strong><small>${state.tasks.filter(t => isScheduled(t) && t.appliances.length === 0).length} 个步骤</small><span class="column-resize" data-resize-unassigned role="separator" tabindex="0" aria-label="调整无器具列宽" aria-orientation="vertical" aria-valuemin="${MIN_COLUMN_WIDTH}" aria-valuemax="${MAX_COLUMN_WIDTH}" aria-valuenow="${Math.round(unassignedWidth)}"></span></div>` : "") + state.appliances.map((a, i) => `<div class="appliance-head ${draggedResourceId === a.id ? "reordering" : ""}" data-appliance-id="${esc(a.id)}" style="flex-basis:${widths[i]}px"><button type="button" class="appliance-open ${a.name.trim() ? "" : "icon-only"}" data-open-appliance="${esc(a.id)}" aria-label="设置${esc(resourceLabel(a))}"><span class="tool-icon">${esc(a.icon)}</span>${a.name.trim() ? `<strong>${esc(a.name)}</strong><small>${state.tasks.filter(t => isScheduled(t) && t.appliances.includes(a.id)).length} 个步骤${a.capacity ? ` · 上限 ${a.capacity}` : ""}</small>` : ""}</button><button type="button" class="column-move" data-move-appliance="${esc(a.id)}" aria-label="左右拖动排序${esc(resourceLabel(a))}" title="左右拖动排序">⠿</button><span class="column-resize" data-resize-appliance="${esc(a.id)}" role="separator" tabindex="0" aria-label="调整${esc(resourceLabel(a))}列宽" aria-orientation="vertical" aria-valuemin="${MIN_COLUMN_WIDTH}" aria-valuemax="${MAX_COLUMN_WIDTH}" aria-valuenow="${Math.round(widths[i])}"></span></div>`).join("") + '<div class="add-appliance-cell"><button id="addAppliance" type="button" aria-label="添加器具或人员" title="添加器具或人员">＋</button></div>';
   $("addAppliance").onclick = () => openAppliance();
+  $("applianceHeads").querySelectorAll("small").forEach(label => {
+    label.classList.toggle("overflows", label.scrollWidth > label.clientWidth);
+    label.title = label.textContent;
+  });
   const firstHour = Math.ceil(start / 60) * 60;
   $("timeAxis").innerHTML = Array.from({ length: Math.max(0, Math.ceil((end - firstHour) / 60)) }, (_, index) => {
     const time = firstHour + index * 60;
@@ -268,13 +272,12 @@ function renderConnections() {
   const lanes = $("lanes");
   const bounds = lanes.getBoundingClientRect();
   const nodes = new Map();
-  lanes.querySelectorAll(".lane:not([data-person='true']) .task-card").forEach(card => {
+  lanes.querySelectorAll(".lane .task-card").forEach(card => {
     const rect = card.getBoundingClientRect();
     const id = card.dataset.id;
     if (!nodes.has(id)) nodes.set(id, []);
     nodes.get(id).push({ x: rect.left - bounds.left + rect.width / 2, top: rect.top - bounds.top, bottom: rect.bottom - bounds.top, lane: card.parentElement.dataset.resourceId || "unassigned" });
   });
-  const people = new Set(state.appliances.filter(isPerson).map(a => a.id));
   const paths = [];
   const addConnection = (from, to, kind, fromLane = null) => {
     const completion = kind === "completion";
@@ -284,7 +287,7 @@ function renderConnections() {
       if (fromLane !== null && source.lane !== fromLane) continue;
       if (completion && source.lane === target.lane) continue;
       // Shared lanes continue vertically; avoid crossing their duplicate cards.
-      if (source.lane !== target.lane && toolLanes(from).includes(target.lane) && toolLanes(to).includes(source.lane)) continue;
+      if (source.lane !== target.lane && resourceLanes(from).includes(target.lane) && resourceLanes(to).includes(source.lane)) continue;
       const y1 = source.bottom, y2 = completion ? target.bottom : target.top;
       const bend = Math.max(24, Math.abs(y2 - y1) * .45);
       const arc = Math.abs(source.x - target.x) < 1 ? 16 : 0;
@@ -293,19 +296,19 @@ function renderConnections() {
       paths.push(`<path data-kind="${kind}" data-from-id="${esc(from.id)}" data-to-id="${esc(to.id)}" data-from-lane="${esc(source.lane)}" data-to-lane="${esc(target.lane)}" d="${d}" stroke="${DISH_STROKES[dishIndex(from) % DISH_STROKES.length]}"/>`);
     }
   };
-  const toolLanes = task => task.appliances.length ? task.appliances.filter(id => !people.has(id)) : ["unassigned"];
+  const resourceLanes = task => task.appliances.length ? task.appliances : ["unassigned"];
   const continues = (from, to) => from.id !== to.id && minutes(to.start) < minutes(from.end)
     && (minutes(to.end) > minutes(from.end) || to.end === from.end && minutes(to.start) < minutes(from.start));
   for (const dish of state.dishes) {
-    const tasks = state.tasks.filter(t => isScheduled(t) && t.dishId === dish.id && (t.appliances.length === 0 || t.appliances.some(id => !people.has(id)))).sort((a, b) => minutes(a.start) - minutes(b.start));
+    const tasks = state.tasks.filter(t => isScheduled(t) && t.dishId === dish.id).sort((a, b) => minutes(a.start) - minutes(b.start));
     for (const to of tasks) {
       const candidates = tasks.filter(from => from.id !== to.id && minutes(from.end) <= minutes(to.start));
       const latestEnd = Math.max(-1, ...candidates.map(from => minutes(from.end)));
       for (const from of candidates.filter(from => minutes(from.end) === latestEnd)) addConnection(from, to, "sequence");
-      // Each tool finishes into the next still-active tool interval. Choose on
+      // Each resource finishes into the next still-active interval. Choose on
       // the full plan so hidden intermediates cannot create false shortcuts.
-      for (const lane of toolLanes(to)) {
-        const candidates = tasks.filter(outer => continues(to, outer) && toolLanes(outer).some(id => id !== lane));
+      for (const lane of resourceLanes(to)) {
+        const candidates = tasks.filter(outer => continues(to, outer) && resourceLanes(outer).some(id => id !== lane));
         const nextEnd = Math.min(Infinity, ...candidates.map(outer => minutes(outer.end)));
         const next = candidates.filter(outer => minutes(outer.end) === nextEnd);
         const latestStart = Math.max(-1, ...next.map(outer => minutes(outer.start)));

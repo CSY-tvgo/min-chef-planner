@@ -368,13 +368,14 @@ def test_unassigned_and_links(browser, url, errors):
     assert header.locator('.tool-icon').evaluate('(e) => parseFloat(getComputedStyle(e).fontSize)') >= 25
     assert header.get_attribute('aria-label')
     paths = page.locator('.dish-connections path')
-    assert paths.count() == 9
-    assert page.locator('[data-from-id="a"][data-to-id="b"]').count() == 2
-    assert page.locator('[data-from-id="b"][data-to-id="c"]').count() == 2
-    assert page.locator('[data-from-id="b"][data-to-id="d"]').count() == 2
-    assert page.locator('[data-from-id="c"][data-to-id="e"]').count() == 1
-    assert page.locator('[data-from-id="d"][data-to-id="e"]').count() == 1
-    assert page.locator('[data-from-lane="chef"], [data-to-lane="chef"], [data-from-id="human"], [data-to-id="human"]').count() == 0
+    assert paths.count() == 13
+    assert page.locator('[data-from-id="a"][data-to-id="b"]').count() == 3
+    assert page.locator('[data-from-id="b"][data-to-id="c"]').count() == 3
+    assert page.locator('[data-from-id="b"][data-to-id="d"]').count() == 3
+    assert page.locator('[data-from-id="c"][data-to-id="human"]').count() == 1
+    assert page.locator('[data-from-id="d"][data-to-id="human"]').count() == 1
+    assert page.locator('[data-from-id="human"][data-to-id="e"]').count() == 1
+    assert page.locator('[data-from-id="c"][data-to-id="e"], [data-from-id="d"][data-to-id="e"]').count() == 0
     assert page.locator('.dish-connections').evaluate('(e) => getComputedStyle(e).pointerEvents') == 'none'
     assert 'NaN' not in page.locator('.dish-connections').inner_html()
     assert page.locator('[data-id="a"]').evaluate('(e) => e.style.background') == page.locator('[data-id="c"]').evaluate('(e) => e.style.background')
@@ -385,13 +386,13 @@ def test_unassigned_and_links(browser, url, errors):
     drag(page, page.locator('.lane[data-resource-id="stove"] [data-id="b"] .move-handle'), scale(page)/12)
     assert page.locator('[data-from-id="a"][data-to-id="b"]').first.get_attribute('d') != old_path
     page.locator('[data-filter="todo"]').click()
-    assert page.locator('.dish-connections path').count() == 3
+    assert page.locator('.dish-connections path').count() == 4
     assert page.locator('[data-from-id="a"][data-to-id="c"]').count() == 0
     page.locator('[data-filter="all"]').click()
     set_range(page, '10:35', '12:20')
-    assert page.locator('.dish-connections path').count() == 6
+    assert page.locator('.dish-connections path').count() == 9
     page.reload()
-    assert page.locator('.dish-connections path').count() == 6
+    assert page.locator('.dish-connections path').count() == 9
     # Empty-resource cards remain editable and draggable through the overlay.
     set_range(page, '10:00', '17:00')
     drag(page, page.locator('.lane[data-unassigned] [data-id="e"] .move-handle'), scale(page)/12)
@@ -408,7 +409,7 @@ def test_unassigned_and_links(browser, url, errors):
     assert 'NaN' not in page.locator('.dish-connections').inner_html()
     assert not errors, errors
     context.close()
-    print('PASS: unassigned lane, icon-only unnamed headers, visible people choices, branching/merging tool-only curves, filtering, resizing and dragging')
+    print('PASS: unassigned lane, icon-only unnamed headers, visible people choices, branching/merging resource curves, filtering, resizing and dragging')
 
 
 def test_sequence_and_settings(browser, url, errors):
@@ -939,6 +940,81 @@ def test_multi_tool_links_and_example(browser, url, errors):
     print('PASS: dish-name fallback, shared/staggered multi-tool edges, hidden/clipped intermediates and atomic example import from help')
 
 
+def test_narrow_headers_and_person_links(browser, url, errors):
+    context=browser.new_context(viewport={'width':375,'height':812},is_mobile=True,has_touch=True)
+    page=context.new_page();page.on('pageerror',lambda e:errors.append(str(e)))
+    page.goto(url);page.locator('.task-card .check').first.tap()
+    data=plan(page);template=data['tasks'][0]
+    data.update(timelineStart='10:00',timelineEnd='12:00',unassignedWidth=64)
+    data['appliances']=[
+        {'id':'oven','name':'很长很长的烤箱名称','icon':'🔆','capacity':1,'width':140},
+        {'id':'chef','name':'小敏','icon':'👩🏻‍🍳','capacity':1,'width':64},
+        {'id':'chef2','name':'小明','icon':'👨🏻‍🍳','capacity':1,'width':64}]
+    def task(id,start,end,resources):
+        return {**template,'id':id,'name':id,'start':start,'end':end,'appliances':resources,'done':False}
+    def seed(tasks):
+        data['tasks']=tasks
+        page.evaluate('([k,v])=>localStorage.setItem(k,JSON.stringify(v))',[KEY,data]);page.reload()
+    seed([task('a','10:00','10:15',['oven','chef']),task('b','10:20','10:35',['oven','chef']),
+          task('c','10:40','10:55',['oven']),task('d','11:00','11:15',['oven']),task('u','11:20','11:30',[])])
+    def aligned():
+        for head in page.locator('.appliance-head, .unassigned-head').all():
+            id=head.get_attribute('data-appliance-id')
+            lane=page.locator(f'.lane[data-resource-id="{id}"]' if id else '.lane[data-unassigned]')
+            h,l=head.bounding_box(),lane.bounding_box()
+            assert abs(h['x']-l['x'])<.1 and abs(h['width']-l['width'])<.1,(id,h,l)
+            assert abs(h['width']-head.evaluate('(e)=>parseFloat(e.style.flexBasis)'))<.1
+    aligned()
+    label=page.locator('[data-open-appliance="oven"] small')
+    full=label.inner_text();assert '4 个步骤' in full and '上限 1' in full
+    assert label.evaluate('(e)=>getComputedStyle(e).maskImage')=='none'
+    resize_column(page,-76);aligned()
+    assert plan(page)['appliances'][0]['width']==64
+    assert label.evaluate('(e)=>e.scrollWidth>e.clientWidth')
+    assert 'linear-gradient' in label.evaluate('(e)=>getComputedStyle(e).maskImage')
+    assert label.inner_text()==full and label.get_attribute('title')==full
+    page.screenshot(path='/tmp/minchef-narrow-headers.png')
+    resize_column(page,100);aligned()
+    assert label.evaluate('(e)=>e.scrollWidth<=e.clientWidth')
+    assert label.evaluate('(e)=>getComputedStyle(e).maskImage')=='none'
+    assert label.inner_text()==full
+    # Touch resizing back to minimum must preserve geometry, then keyboard widening clears the fade.
+    handle=page.locator('[data-resize-appliance="oven"]');handle.scroll_into_view_if_needed();box=handle.bounding_box()
+    session=context.new_cdp_session(page)
+    point={'x':box['x']+box['width']/2,'y':box['y']+box['height']/2}
+    session.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[point]})
+    point['x']-=100
+    session.send('Input.dispatchTouchEvent',{'type':'touchMove','touchPoints':[point]})
+    session.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]})
+    aligned();assert plan(page)['appliances'][0]['width']==64
+    page.reload();aligned();assert 'linear-gradient' in label.evaluate('(e)=>getComputedStyle(e).maskImage')
+    page.locator('[data-resize-appliance="oven"]').focus()
+    for _ in range(10):page.keyboard.press('ArrowRight')
+    aligned();assert label.evaluate('(e)=>getComputedStyle(e).maskImage')=='none'
+    page.locator('[data-move-appliance="oven"]').focus();page.keyboard.press('ArrowRight')
+    aligned();assert plan(page)['appliances'][1]['id']=='oven'
+    for width in [320,1280]:
+        page.set_viewport_size({'width':width,'height':812});page.wait_for_timeout(50);aligned()
+    # People participate in consecutive steps, including person-only and mixed assignments.
+    seed([task('prep','10:00','10:15',['oven']),task('hands','10:20','10:45',['chef']),
+          task('mixed','10:50','11:00',['oven','chef']),task('finish','11:05','11:20',['chef2'])])
+    assert page.locator('path[data-from-id="prep"][data-to-id="hands"][data-to-lane="chef"]').count()==1
+    assert page.locator('path[data-from-id="hands"][data-to-id="mixed"]').count()==2
+    assert page.locator('path[data-from-id="mixed"][data-to-id="finish"][data-to-lane="chef2"]').count()==2
+    data['tasks'][1]['done']=True
+    page.evaluate('([k,v])=>localStorage.setItem(k,JSON.stringify(v))',[KEY,data]);page.reload()
+    page.locator('[data-filter="todo"]').click()
+    assert page.locator('path[data-from-id="hands"],path[data-to-id="hands"],path[data-from-id="prep"][data-to-id="mixed"]').count()==0
+    # A person's overlapping interval joins to the tool's true finish, with clipping respected.
+    seed([task('hold','10:00','11:00',['oven']),task('person','10:20','10:45',['chef'])])
+    path=page.locator('path[data-kind="completion"][data-from-id="person"][data-to-id="hold"]')
+    assert path.count()==1 and path.get_attribute('data-from-lane')=='chef'
+    set_range(page,'10:00','10:50');assert path.count()==0
+    assert not errors,errors
+    context.close()
+    print('PASS: narrow header/lane alignment, conditional fade/reveal, mouse/touch/keyboard resizing and mixed/person-only sequence/completion links')
+
+
 def test_duration_scheduling(browser, url, errors):
     import copy
     context = browser.new_context(viewport={'width':375,'height':812},is_mobile=True,has_touch=True)
@@ -1281,6 +1357,7 @@ def run():
             test_completion_links_and_compact_layout(browser, url, errors)
             test_unassigned_width_and_help(browser, url, errors)
             test_multi_tool_links_and_example(browser, url, errors)
+            test_narrow_headers_and_person_links(browser, url, errors)
             test_duration_scheduling(browser, url, errors)
             test_empty_column_and_now(browser, url, errors)
             browser.close()

@@ -139,7 +139,13 @@ button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 /* Appliance settings and a clock/gear control below the time axis. */
 .appliance-head { padding: 0; }
 .appliance-open { position: relative; display: block; width: 100%; height: 64px; padding: 26px 6px 4px; text-align: left; border: 0; background: transparent; color: var(--ink); }
-.appliance-open small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.appliance-head, .unassigned-head, .lane { min-width: 0; }
+.appliance-open { min-width: 0; overflow: hidden; }
+.appliance-open small, .unassigned-head small { white-space: nowrap; overflow: hidden; text-overflow: clip; }
+.appliance-open small.overflows, .unassigned-head small.overflows {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 12px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 12px), transparent);
+}
 .appliance-open:hover { background: #cfe7d440; }
 .top-actions #manageMenu { padding: 11px 14px; font-size: 12px; }
 .top-actions #manageMenu::after { content: none; }

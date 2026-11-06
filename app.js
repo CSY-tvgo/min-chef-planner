@@ -17,7 +17,12 @@ const demo = {
     { id: "t8", name: "保温", dish: "米饭", start: "12:00", end: "13:00", appliances: ["rice"], note: "", done: false }
   ]
 };
-let state = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null") || structuredClone(demo);
+let state;
+try {
+  state = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null") || structuredClone(demo);
+} catch {
+  state = structuredClone(demo);
+}
 let filter = "all";
 const $ = (id) => document.getElementById(id);
 function save() { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); $("saveState").innerHTML = '<span class="status-dot"></span>已自动保存'; }
@@ -48,6 +53,10 @@ function openTask(id = "") {
   $("applianceChecks").innerHTML = state.appliances.map(a => `<label class="check-item"><input type="checkbox" value="${a.id}" ${task?.appliances.includes(a.id) ? "checked" : ""}>${a.icon} ${esc(a.name)}</label>`).join("");
   $("taskDialog").showModal();
 }
+function closeDialog(id) {
+  const dialog = $(id);
+  if (dialog?.open) dialog.close();
+}
 function deleteAppliance(id) {
   if (state.appliances.length <= 1) return alert("至少需要保留一件器具。");
   if (!confirm("删除器具后，关联步骤将失去该器具。确定删除吗？")) return;
@@ -55,9 +64,31 @@ function deleteAppliance(id) {
 }
 document.querySelectorAll(".filter").forEach(b => b.onclick = () => { filter = b.dataset.filter; document.querySelectorAll(".filter").forEach(x => x.classList.toggle("active", x === b)); render(); });
 $("addTaskTop").onclick = () => openTask(); $("addAppliance").onclick = () => $("applianceDialog").showModal(); $("manageMenu").onclick = () => $("menuDialog").showModal();
-document.querySelectorAll("[data-close-dialog]").forEach(button => button.onclick = () => $(button.dataset.closeDialog).close());
-$("taskForm").onsubmit = (e) => { e.preventDefault(); const id = $("taskId").value || `t${Date.now()}`; const appliances = [...$("applianceChecks").querySelectorAll("input:checked")].map(x => x.value); if (!appliances.length) return alert("请选择至少一件器具。"); const data = { id, name: $("taskName").value.trim(), dish: $("taskDish").value.trim(), start: $("taskStart").value, end: $("taskEnd").value, appliances, note: $("taskNote").value.trim(), done: state.tasks.find(t => t.id === id)?.done || false }; if (minutes(data.end) <= minutes(data.start)) return alert("结束时间必须晚于开始时间。"); const index = state.tasks.findIndex(t => t.id === id); index >= 0 ? state.tasks.splice(index, 1, data) : state.tasks.push(data); $("taskDialog").close(); save(); render(); };
-$("applianceForm").onsubmit = (e) => { e.preventDefault(); state.appliances.push({ id: `a${Date.now()}`, name: $("applianceName").value.trim(), icon: $("applianceIcon").value }); $("applianceForm").reset(); $("applianceDialog").close(); save(); render(); };
+document.querySelectorAll("[data-close-dialog]").forEach(button => button.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); closeDialog(button.dataset.closeDialog); }));
+document.querySelectorAll("dialog").forEach(dialog => dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); }));
+$("taskForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const id = $("taskId").value || `t${Date.now()}`;
+  const name = $("taskName").value.trim();
+  const dish = $("taskDish").value.trim();
+  const start = $("taskStart").value;
+  const end = $("taskEnd").value;
+  const appliances = [...$("applianceChecks").querySelectorAll("input:checked")].map(x => x.value);
+  if (!name || !dish) return alert("请填写步骤名称和所属菜品。");
+  if (!appliances.length) return alert("请选择至少一件器具。");
+  const data = { id, name, dish, start, end, appliances, note: $("taskNote").value.trim(), done: state.tasks.find(t => t.id === id)?.done || false };
+  if (!start || !end || minutes(end) <= minutes(start)) return alert("结束时间必须晚于开始时间。");
+  const index = state.tasks.findIndex(t => t.id === id);
+  index >= 0 ? state.tasks.splice(index, 1, data) : state.tasks.push(data);
+  closeDialog("taskDialog"); save(); render();
+});
+$("applianceForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const name = $("applianceName").value.trim();
+  if (!name) return alert("请填写器具名称。");
+  state.appliances.push({ id: `a${Date.now()}`, name, icon: $("applianceIcon").value });
+  $("applianceForm").reset(); closeDialog("applianceDialog"); save(); render();
+});
 $("resetDemo").onclick = () => { if (confirm("恢复示例排程？当前数据会被覆盖。")) { state = structuredClone(demo); save(); render(); } };
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") document.querySelectorAll("dialog[open]").forEach(d => d.close()); });
 render();

@@ -5,9 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f6f7f2" />
     <title>宴席厨房排程</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -64,7 +61,7 @@
     </div>
 
     <dialog id="taskDialog" class="modal">
-      <form method="dialog" id="taskForm">
+      <form id="taskForm">
         <div class="modal-head">
           <div><p class="eyebrow accent">NEW / EDIT STEP</p><h3 id="taskDialogTitle">添加烹饪步骤</h3></div>
           <button class="icon-button" type="button" data-close-dialog="taskDialog" aria-label="关闭">×</button>
@@ -83,7 +80,7 @@
     </dialog>
 
     <dialog id="applianceDialog" class="modal">
-      <form method="dialog" id="applianceForm">
+      <form id="applianceForm">
         <div class="modal-head"><div><p class="eyebrow accent">KITCHEN TOOL</p><h3>添加器具</h3></div><button class="icon-button" type="button" data-close-dialog="applianceDialog" aria-label="关闭">×</button></div>
         <label>器具名称<input id="applianceName" required placeholder="例如：空气炸锅" /></label>
         <label>图标
@@ -94,7 +91,7 @@
     </dialog>
 
     <dialog id="menuDialog" class="modal menu-modal">
-      <form method="dialog"><div class="modal-head"><div><p class="eyebrow accent">MENU / DISHES</p><h3>菜单</h3></div><button class="icon-button" type="button" data-close-dialog="menuDialog" aria-label="关闭">×</button></div><div id="menuList" class="menu-list"></div><div class="modal-actions"><button class="button button-primary" type="button" data-close-dialog="menuDialog">完成</button></div></form>
+      <div class="modal-head"><div><p class="eyebrow accent">菜单</p><h3>菜单</h3></div><button class="icon-button" type="button" data-close-dialog="menuDialog" aria-label="关闭">×</button></div><div id="menuList" class="menu-list"></div><div class="modal-actions"><button class="button button-primary" type="button" data-close-dialog="menuDialog">完成</button></div>
     </dialog>
     <script src="app.js"></script>
   </body>

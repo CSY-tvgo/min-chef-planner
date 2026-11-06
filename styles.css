@@ -150,3 +150,12 @@ button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 #capacityStatus { color: #ad3527; font-size: 11px; }
 .task-card.capacity-conflict { border-left-color: #ad3527; outline: 1px solid #ad3527; outline-offset: -1px; }
 @media (max-width: 650px) { .top-actions .save-state { max-width: 74px; } }
+/* Keep the deliberately explanatory subtitle readable on small screens. */
+.brand { min-width: 0; flex: 1; }
+.brand h1 span { white-space: normal; max-width: 420px; line-height: 1.5; }
+.topbar { gap: 12px; }
+.top-actions { flex-shrink: 0; align-self: flex-start; }
+.people-selection { margin: 15px 0; color: var(--muted); font-size: 12px; }
+.people-selection summary { cursor: pointer; padding: 8px 0; }
+.people-selection summary:focus-visible { outline: 2px solid var(--green); }
+.people-selection .check-item { color: var(--ink); }

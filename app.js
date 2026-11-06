@@ -6,8 +6,8 @@ const MAX_COLUMN_WIDTH = 800;
 const COLORS = ["#cfe7d4", "#f4d28a", "#eaa18f", "#c9c4e7", "#b6dce4"];
 const demo = {
   appliances: [
-    { id: "stove", name: "灶台", icon: "♨" }, { id: "oven", name: "烤箱", icon: "▱" },
-    { id: "rice", name: "电饭锅", icon: "◌" }, { id: "steamer", name: "蒸锅", icon: "◉" }
+    { id: "stove", name: "灶台", icon: "🔥" }, { id: "oven", name: "烤箱", icon: "▱" },
+    { id: "rice", name: "电饭锅", icon: "🍚" }, { id: "steamer", name: "蒸锅", icon: "♨️" }
   ],
   tasks: [
     { id: "t1", name: "腌制排骨", dish: "粉蒸排骨", start: "10:00", end: "10:30", appliances: ["stove"], note: "提前入味", done: true },
@@ -90,6 +90,8 @@ function save() {
 function minutes(time) { const [h, m] = time.split(":").map(Number); return h * 60 + m; }
 function esc(value) { return String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c])); }
 function display(value, fallback) { return value || fallback; }
+function isPerson(resource) { return Boolean(resource && /^(👨|👩)([\u{1F3FB}-\u{1F3FF}])?\u200D🍳$/u.test(resource.icon)); }
+function resourceLabel(resource) { return display(resource?.name, isPerson(resource) ? "未命名厨师" : "未命名器具"); }
 function addMinutes(time, amount) {
   const value = minutes(time) + amount;
   const hours = Math.floor((value + 1440) % 1440 / 60);
@@ -132,7 +134,7 @@ function findCapacityConflicts() {
       if (new Set(active.map(t => t.dishId)).size <= appliance.capacity) continue;
       active.forEach(t => {
         if (!conflicts.has(t.id)) conflicts.set(t.id, new Set());
-        conflicts.get(t.id).add(display(appliance.name, "未命名器具"));
+        conflicts.get(t.id).add(resourceLabel(appliance));
       });
     }
   }
@@ -148,7 +150,8 @@ function sizeTimeline() {
 function render() {
   const start = minutes(state.timelineStart);
   capacityConflicts = findCapacityConflicts();
-  $("summary").innerHTML = `<div class="stat"><strong>${state.dishes.length}</strong><span>道菜品</span></div><div class="stat"><strong>${state.appliances.length}</strong><span>件器具</span></div><div class="stat"><strong>${state.tasks.filter(t => t.done).length}/${state.tasks.length}</strong><span>步骤完成</span></div>`;
+  const peopleCount = state.appliances.filter(isPerson).length;
+  $("summary").innerHTML = `<div class="stat"><strong>${state.dishes.length}</strong><span>道菜品</span></div><div class="stat"><strong>${state.appliances.length - peopleCount}</strong><span>件器具</span></div>${peopleCount ? `<div class="stat"><strong>${peopleCount}</strong><span>位厨师</span></div>` : ""}<div class="stat"><strong>${state.tasks.filter(t => t.done).length}/${state.tasks.length}</strong><span>步骤完成</span></div>`;
   sizeTimeline();
   const end = minutes(state.timelineEnd);
   timelineDuration = end - start;
@@ -158,7 +161,7 @@ function render() {
   const defaultWidth = Math.max(MIN_COLUMN_WIDTH, (document.querySelector(".planner-wrap").clientWidth - 28) / 4);
   const widths = state.appliances.map(a => a.width || defaultWidth);
   $("planner").style.width = `calc(var(--sidebar) + ${widths.reduce((a, b) => a + b, 0) + 48}px)`;
-  $("applianceHeads").innerHTML = state.appliances.map((a, i) => `<div class="appliance-head" data-appliance-id="${esc(a.id)}" style="flex-basis:${widths[i]}px"><button type="button" class="appliance-open" data-open-appliance="${esc(a.id)}" aria-label="设置${esc(display(a.name, "未命名器具"))}"><span class="tool-icon">${esc(a.icon)}</span><strong>${esc(display(a.name, "未命名器具"))}</strong><small>${state.tasks.filter(t => t.appliances.includes(a.id)).length} 个步骤${a.capacity ? ` · 上限 ${a.capacity}` : ""}</small></button><span class="column-resize" data-resize-appliance="${esc(a.id)}" role="separator" tabindex="0" aria-label="调整${esc(display(a.name, "未命名器具"))}列宽" aria-orientation="vertical" aria-valuemin="${MIN_COLUMN_WIDTH}" aria-valuemax="${MAX_COLUMN_WIDTH}" aria-valuenow="${Math.round(widths[i])}"></span></div>`).join("") + '<div class="add-appliance-cell"><button id="addAppliance" type="button" aria-label="添加器具" title="添加器具">＋</button></div>';
+  $("applianceHeads").innerHTML = state.appliances.map((a, i) => `<div class="appliance-head" data-appliance-id="${esc(a.id)}" style="flex-basis:${widths[i]}px"><button type="button" class="appliance-open" data-open-appliance="${esc(a.id)}" aria-label="设置${esc(resourceLabel(a))}"><span class="tool-icon">${esc(a.icon)}</span><strong>${esc(resourceLabel(a))}</strong><small>${state.tasks.filter(t => t.appliances.includes(a.id)).length} 个步骤${a.capacity ? ` · 上限 ${a.capacity}` : ""}</small></button><span class="column-resize" data-resize-appliance="${esc(a.id)}" role="separator" tabindex="0" aria-label="调整${esc(resourceLabel(a))}列宽" aria-orientation="vertical" aria-valuemin="${MIN_COLUMN_WIDTH}" aria-valuemax="${MAX_COLUMN_WIDTH}" aria-valuenow="${Math.round(widths[i])}"></span></div>`).join("") + '<div class="add-appliance-cell"><button id="addAppliance" type="button" aria-label="添加器具或人员" title="添加器具或人员">＋</button></div>';
   $("addAppliance").onclick = () => openAppliance();
   const firstHour = Math.ceil(start / 60) * 60;
   $("timeAxis").innerHTML = Array.from({ length: Math.max(0, Math.ceil((end - firstHour) / 60)) }, (_, index) => {
@@ -168,7 +171,7 @@ function render() {
   $("lanes").style.backgroundPositionY = `${(firstHour - start) / 60 * hourHeight}px`;
   $("lanes").innerHTML = state.appliances.map((a, i) => `<div class="lane" style="flex-basis:${widths[i]}px">${visible.filter(t => t.appliances.includes(a.id)).map(t => taskCard(t, layouts[i])).join("")}</div>`).join("");
   renderMenu();
-  $("capacityStatus").textContent = capacityConflicts.size ? `${capacityConflicts.size} 个步骤超出器具容量` : "";
+  $("capacityStatus").textContent = capacityConflicts.size ? `${capacityConflicts.size} 个步骤超出器具或人力容量` : "";
   document.querySelectorAll("[data-open-appliance]").forEach(b => b.onclick = () => openAppliance(b.dataset.openAppliance));
   document.querySelectorAll(".task-card").forEach(card => {
     card.onclick = (event) => { if (Date.now() > suppressClickUntil && !event.target.closest(".resize-handle, .move-handle")) openTask(card.dataset.id); };
@@ -301,7 +304,7 @@ function renderMenu() {
     }
     const tasks = state.tasks.filter(t => t.dishId === dish.id).sort((a, b) => minutes(a.start) - minutes(b.start));
     $("menuList").innerHTML = tasks.map(t => {
-      const tools = t.appliances.map(id => display(state.appliances.find(a => a.id === id)?.name, "未命名器具")).join("、") || "未分配器具";
+      const tools = t.appliances.map(id => { const a = state.appliances.find(a => a.id === id); return `${a?.icon || ""} ${resourceLabel(a)}`; }).join("、") || "未分配器具或人力";
       return `<div class="step-row"><button type="button" class="step-check ${t.done ? "done" : ""}" data-toggle-step="${esc(t.id)}" aria-label="${t.done ? "标为待处理" : "标为完成"}" aria-pressed="${t.done}">${t.done ? "✓" : "○"}</button><button type="button" class="step-edit" data-edit-task="${esc(t.id)}"><strong>${esc(display(t.name, "未命名步骤"))}</strong><span>${t.start}–${t.end} · ${esc(tools)}${capacityConflicts.has(t.id) ? " · 占用超限" : ""}</span></button></div>`;
     }).join("") || '<p class="empty-state">还没有步骤，点下方添加。</p>';
     document.querySelectorAll("[data-edit-task]").forEach(b => b.onclick = () => openTask(b.dataset.editTask));
@@ -339,7 +342,10 @@ function openTask(id = "", dishId = "") {
   $("taskEnd").value = task?.end || addMinutes("00:00", Math.min(1439, start + 30));
   $("taskNote").value = task?.note || "";
   $("taskError").textContent = "";
-  $("applianceChecks").innerHTML = state.appliances.map(a => `<label class="check-item"><input type="checkbox" value="${esc(a.id)}" ${task?.appliances.includes(a.id) ? "checked" : ""}>${esc(a.icon)} ${esc(display(a.name, "未命名器具"))}</label>`).join("") || '<span class="empty-state">可稍后在时间轴右侧添加器具。</span>';
+  const choice = a => `<label class="check-item"><input type="checkbox" value="${esc(a.id)}" ${task?.appliances.includes(a.id) ? "checked" : ""}>${esc(a.icon)} ${esc(resourceLabel(a))}</label>`;
+  $("applianceChecks").innerHTML = state.appliances.filter(a => !isPerson(a)).map(choice).join("") || '<span class="empty-state">可稍后在时间轴右侧添加器具。</span>';
+  $("peopleChecks").innerHTML = state.appliances.filter(isPerson).map(choice).join("") || '<span class="empty-state">在时间轴右侧添加 👨🏻‍🍳 或 👩🏻‍🍳，即可在此选择参与者。</span>';
+  $("peopleSelection").open = state.appliances.some(a => isPerson(a) && task?.appliances.includes(a.id));
   $("deleteTask").hidden = !task;
   $("taskDialog").showModal();
 }
@@ -347,25 +353,37 @@ function closeDialog(id) {
   const dialog = $(id);
   if (dialog?.open) dialog.close();
 }
+function updateResourceLabels() {
+  const person = isPerson({ icon: $("applianceIcon").value });
+  $("applianceNameLabel").textContent = person ? "人员名称" : "器具名称";
+  $("applianceCapacityLabel").textContent = person ? "最多同时参与的菜品数" : "最多同时占用的菜品数";
+  $("applianceDialogTitle").textContent = $("applianceId").value ? (person ? "人员设置" : "器具设置") : (person ? "添加人员" : "添加器具");
+  $("deleteAppliance").textContent = person ? "删除人员" : "删除器具";
+  $("saveAppliance").textContent = $("applianceId").value ? "保存设置" : (person ? "添加人员" : "添加器具");
+}
 function openAppliance(id = "") {
   const appliance = state.appliances.find(a => a.id === id);
   $("applianceId").value = id;
   $("applianceDialogTitle").textContent = appliance ? "器具设置" : "添加器具";
   $("applianceName").value = appliance?.name || "";
+  $("applianceIcon").querySelectorAll("[data-legacy]").forEach(option => option.remove());
   if (appliance && ![...$("applianceIcon").options].some(option => option.value === appliance.icon)) {
-    $("applianceIcon").add(new Option(appliance.icon, appliance.icon));
+    const option = new Option(`${appliance.icon} 原图标`, appliance.icon);
+    option.dataset.legacy = "true";
+    $("applianceIcon").add(option);
   }
-  $("applianceIcon").value = appliance?.icon || "◉";
+  $("applianceIcon").value = appliance?.icon || "🧰";
+  updateResourceLabels();
   $("applianceCapacity").value = String(appliance?.capacity || 0);
   $("deleteAppliance").hidden = !appliance;
-  $("saveAppliance").textContent = appliance ? "保存设置" : "添加器具";
   $("applianceDialog").showModal();
 }
 function deleteAppliance(id) {
-  if (!confirm("删除器具后，关联步骤将失去该器具。确定删除吗？")) return;
+  if (!confirm("删除后会解除步骤关联，步骤仍会保留。确定删除吗？")) return;
   state.appliances = state.appliances.filter(a => a.id !== id); state.tasks.forEach(t => t.appliances = t.appliances.filter(a => a !== id)); closeDialog("applianceDialog"); save(); render();
 }
 document.querySelectorAll(".filter").forEach(b => b.onclick = () => { filter = b.dataset.filter; document.querySelectorAll(".filter").forEach(x => x.classList.toggle("active", x === b)); render(); });
+$("applianceIcon").onchange = updateResourceLabels;
 $("deleteAppliance").onclick = () => deleteAppliance($("applianceId").value);
 $("manageMenu").onclick = openMenu;
 $("taskDish").onchange = () => { $("newDishLabel").hidden = $("taskDish").value !== "__new__"; };
@@ -401,7 +419,7 @@ $("taskForm").addEventListener("submit", (e) => {
 
   const start = $("taskStart").value;
   const end = $("taskEnd").value;
-  const appliances = [...$("applianceChecks").querySelectorAll("input:checked")].map(x => x.value);
+  const appliances = [...document.querySelectorAll("#applianceChecks input:checked, #peopleChecks input:checked")].map(x => x.value);
   if (!validTime(start) || !validTime(end) || minutes(end) <= minutes(start)) {
     $("taskError").textContent = "结束时间必须晚于开始时间"; return;
   }

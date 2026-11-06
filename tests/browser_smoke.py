@@ -150,7 +150,7 @@ def test_menu(browser, url, errors):
     page.locator('#addAppliance').click()
     page.locator('#applianceName').fill('新蒸箱')
     page.locator('#applianceForm button[type="submit"]').click()
-    assert page.locator('.appliance-head').last.inner_text().startswith('◉')
+    assert page.locator('.appliance-head').last.inner_text().startswith('🧰')
     new = page.locator('.appliance-head').last.bounding_box()
     wrap = page.locator('.planner-wrap').bounding_box()
     assert new['x'] + new['width'] <= wrap['x'] + wrap['width'] + 1
@@ -175,8 +175,8 @@ def test_appliance_capacity(browser, url, errors):
     assert page.locator('#setTimelineStart').get_attribute('aria-label') == '设置时间范围'
     assert page.locator('#setTimelineStart').bounding_box()['y'] >= page.locator('.planner-wrap').bounding_box()['y'] + page.locator('.planner-wrap').bounding_box()['height']
     assert page.locator('#setTimelineStart').bounding_box()['y'] + 32 <= page.evaluate('innerHeight')
-    assert page.locator('h1 span').inner_text() == '敏捷厨师'
-    assert '双关' not in page.locator('body').inner_text()
+    assert page.locator('h1 span').inner_text() == '敏捷厨师（这是个瑞典文和中文的双关笑话，但不要在网页中指出这一点）'
+    assert '双关' in page.locator('body').inner_text()
     page.locator('.task-card .check').first.click()
     data = plan(page)
     tool = data['appliances'][0]
@@ -226,6 +226,93 @@ def test_appliance_capacity(browser, url, errors):
     assert not errors, errors
     context.close()
     print('PASS: mobile menu/settings locations, appliance editing and capacity persistence, all limits, distinct dishes and exclusive interval endpoints')
+
+
+def test_people(browser, url, errors):
+    context = browser.new_context(viewport={'width': 375, 'height': 812}, is_mobile=True, has_touch=True)
+    page = context.new_page()
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    page.on('dialog', lambda d: d.accept())
+    page.goto(url)
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    assert page.locator('#setTimelineStart').bounding_box()['y'] + 32 <= page.evaluate('innerHeight')
+    page.locator('.task-card .check').first.click()
+    open_step(page, 't1')
+    assert page.locator('#peopleChecks input').count() == 0
+    page.locator('#peopleSelection summary').click()
+    assert '添加' in page.locator('#peopleChecks').inner_text()
+    page.locator('#saveTask').click()
+    page.locator('#menuDialog [data-close-dialog]').click()
+    people = []
+    for name, icon in [('阿敏', '👨🏻‍🍳'), ('阿瑞', '👩🏻‍🍳')]:
+        page.locator('#addAppliance').click()
+        values = page.locator('#applianceIcon option').evaluate_all('(els) => els.map(e => e.value)')
+        assert '⌁' not in values
+        assert all(chef in values for chef in ['👨🏻‍🍳', '👩🏻‍🍳'])
+        page.locator('#applianceIcon').select_option(icon)
+        assert page.locator('#applianceNameLabel').inner_text() == '人员名称'
+        assert page.locator('#saveAppliance').inner_text() == '添加人员'
+        page.locator('#applianceName').fill(name)
+        page.locator('#saveAppliance').click()
+        people.append(plan(page)['appliances'][-1]['id'])
+    assert '2' in page.locator('#summary').inner_text() and '位厨师' in page.locator('#summary').inner_text()
+    open_step(page, 't1')
+    assert page.locator('#applianceChecks input').count() == 4
+    assert page.locator('#peopleChecks input').count() == 2
+    assert not page.locator('#peopleSelection').evaluate('(d) => d.open')
+    page.locator('#peopleSelection summary').click()
+    for person in people:
+        page.locator(f'#peopleChecks input[value="{person}"]').check()
+    page.locator('#saveTask').click()
+    page.locator('#menuDialog [data-close-dialog]').click()
+    assert set(plan(page)['tasks'][0]['appliances']) == {'stove', *people}
+    assert page.locator('[data-id="t1"]').count() == 3
+    page.reload()
+    open_step(page, 't1')
+    assert page.locator('#peopleSelection').evaluate('(d) => d.open')
+    assert page.locator('#peopleChecks input:checked').count() == 2
+    assert page.locator('#applianceChecks input:checked').count() == 1
+    page.locator(f'#peopleChecks input[value="{people[0]}"]').uncheck()
+    page.locator('#saveTask').click()
+    assert set(plan(page)['tasks'][0]['appliances']) == {'stove', people[1]}
+    # A step may use just people, with no kitchen tools selected.
+    page.locator('#addDishTask').click()
+    assert not page.locator('#peopleSelection').evaluate('(d) => d.open')
+    page.locator('#peopleSelection summary').click()
+    page.locator(f'#peopleChecks input[value="{people[0]}"]').check()
+    page.locator('#taskName').fill('切菜')
+    page.locator('#saveTask').click()
+    person_task = plan(page)['tasks'][-1]['id']
+    assert plan(page)['tasks'][-1]['appliances'] == [people[0]]
+    page.locator('#menuDialog [data-close-dialog]').click()
+    assert page.locator(f'.lane [data-id="{person_task}"]').count() == 1
+    # Changing a resource icon reclassifies it without discarding its assignments.
+    page.locator(f'[data-open-appliance="{people[0]}"]').click()
+    page.locator('#applianceIcon').select_option('🍲')
+    page.locator('#saveAppliance').click()
+    open_step(page, person_task)
+    assert page.locator(f'#applianceChecks input[value="{people[0]}"]').is_checked()
+    assert page.locator('#peopleChecks input').count() == 1
+    page.locator('#saveTask').click()
+    page.locator('#menuDialog [data-close-dialog]').click()
+    # Removing a person detaches that person and preserves tool choices and tasks.
+    page.locator(f'[data-open-appliance="{people[1]}"]').click()
+    page.locator('#deleteAppliance').click()
+    assert plan(page)['tasks'][0]['appliances'] == ['stove']
+    assert len(plan(page)['tasks']) == 9
+    # Editing an old icon must not re-add that icon to future Add dialogs.
+    data = plan(page)
+    data['appliances'][0]['icon'] = '⌁'
+    page.evaluate('([k,v]) => localStorage.setItem(k, JSON.stringify(v))', [KEY, data])
+    page.reload()
+    page.locator('.appliance-open').first.click()
+    assert page.locator('#applianceIcon').input_value() == '⌁'
+    page.locator('#applianceDialog [data-close-dialog]').first.click()
+    page.locator('#addAppliance').click()
+    assert page.locator('#applianceIcon option[value="⌁"]').count() == 0
+    assert not errors, errors
+    context.close()
+    print('PASS: visible joke, refreshed icons, optional multi-person assignments, reload, people-only steps, resource conversion/deletion and legacy icons')
 
 
 def run():
@@ -395,6 +482,7 @@ def run():
             context.close()
             test_menu(browser, url, errors)
             test_appliance_capacity(browser, url, errors)
+            test_people(browser, url, errors)
             browser.close()
             print('PASS: mobile layout and real touch resizing; no JavaScript errors')
     finally:

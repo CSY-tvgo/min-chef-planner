@@ -3,11 +3,13 @@ const SAVE_MESSAGE = "排程会自动保存在当前浏览器的缓存中。";
 let hourHeight = 180;
 const MIN_COLUMN_WIDTH = 64;
 const MAX_COLUMN_WIDTH = 800;
+const SCALES = [1, 2, 2.5, 3, 4, 6];
+const DRAG_STEPS = [1, 5, 10, 15, 30];
 
 const DISH_STROKES = ["#2f6957", "#a87621", "#ad5c49", "#75649d", "#3c7c8a"];
 const COLORS = ["#cfe7d4", "#f4d28a", "#eaa18f", "#c9c4e7", "#b6dce4"];
 const demo = {
-  resourceIconVersion: 1,
+  resourceIconVersion: 1, visibleHours: 2.5, dragStep: 5,
   appliances: [
     { id: "stove", name: "灶台", icon: "♨️" }, { id: "oven", name: "烤箱", icon: "🔆" },
     { id: "rice", name: "电饭锅", icon: "🍚" }, { id: "steamer", name: "蒸锅", icon: "🌫️" }
@@ -26,6 +28,8 @@ const demo = {
 function validTime(value) { return typeof value === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(value); }
 function validState(value) {
   if (!value || !Array.isArray(value.appliances) || !Array.isArray(value.tasks)) return false;
+  if (value.visibleHours !== undefined && !SCALES.includes(value.visibleHours)) return false;
+  if (value.dragStep !== undefined && !DRAG_STEPS.includes(value.dragStep)) return false;
   const ids = new Set();
   for (const a of value.appliances) {
     if (!a || typeof a.id !== "string" || ids.has(a.id) || typeof a.name !== "string" || typeof a.icon !== "string" || (a.width !== undefined && (!Number.isFinite(a.width) || a.width < MIN_COLUMN_WIDTH || a.width > MAX_COLUMN_WIDTH))) return false;
@@ -80,6 +84,9 @@ if (!state.dishes) {
     task.dishId = byName.get(task.dish).id;
   });
 }
+state.visibleHours ||= 2.5;
+state.dragStep ||= 5;
+let draggedResourceId = null;
 let selectedDishId = null;
 let filter = "all";
 let timelineDuration = 0;
@@ -153,7 +160,7 @@ function sizeTimeline() {
   const wrap = document.querySelector(".planner-wrap");
   const height = Math.max(280, window.innerHeight - (wrap.getBoundingClientRect().top + window.scrollY) - 60);
   wrap.style.height = `${height}px`;
-  hourHeight = (height - 64) / 2.5;
+  hourHeight = (height - 64) / (state.visibleHours || 2.5);
   $("planner").style.setProperty("--hour", `${hourHeight}px`);
 }
 function render() {
@@ -172,7 +179,7 @@ function render() {
   const defaultWidth = Math.max(MIN_COLUMN_WIDTH, (document.querySelector(".planner-wrap").clientWidth - 28) / 4);
   const widths = state.appliances.map(a => a.width || defaultWidth);
   $("planner").style.width = `calc(var(--sidebar) + ${widths.reduce((a, b) => a + b, 0) + defaultWidth + 48}px)`;
-  $("applianceHeads").innerHTML = `<div class="unassigned-head" style="flex-basis:${defaultWidth}px"><strong>无器具</strong><small>${state.tasks.filter(t => t.appliances.length === 0).length} 个步骤</small></div>` + state.appliances.map((a, i) => `<div class="appliance-head" data-appliance-id="${esc(a.id)}" style="flex-basis:${widths[i]}px"><button type="button" class="appliance-open ${a.name.trim() ? "" : "icon-only"}" data-open-appliance="${esc(a.id)}" aria-label="设置${esc(resourceLabel(a))}"><span class="tool-icon">${esc(a.icon)}</span>${a.name.trim() ? `<strong>${esc(a.name)}</strong><small>${state.tasks.filter(t => t.appliances.includes(a.id)).length} 个步骤${a.capacity ? ` · 上限 ${a.capacity}` : ""}</small>` : ""}</button><span class="column-resize" data-resize-appliance="${esc(a.id)}" role="separator" tabindex="0" aria-label="调整${esc(resourceLabel(a))}列宽" aria-orientation="vertical" aria-valuemin="${MIN_COLUMN_WIDTH}" aria-valuemax="${MAX_COLUMN_WIDTH}" aria-valuenow="${Math.round(widths[i])}"></span></div>`).join("") + '<div class="add-appliance-cell"><button id="addAppliance" type="button" aria-label="添加器具或人员" title="添加器具或人员">＋</button></div>';
+  $("applianceHeads").innerHTML = `<div class="unassigned-head" style="flex-basis:${defaultWidth}px"><strong>无器具</strong><small>${state.tasks.filter(t => t.appliances.length === 0).length} 个步骤</small></div>` + state.appliances.map((a, i) => `<div class="appliance-head ${draggedResourceId === a.id ? "reordering" : ""}" data-appliance-id="${esc(a.id)}" style="flex-basis:${widths[i]}px"><button type="button" class="appliance-open ${a.name.trim() ? "" : "icon-only"}" data-open-appliance="${esc(a.id)}" aria-label="设置${esc(resourceLabel(a))}"><span class="tool-icon">${esc(a.icon)}</span>${a.name.trim() ? `<strong>${esc(a.name)}</strong><small>${state.tasks.filter(t => t.appliances.includes(a.id)).length} 个步骤${a.capacity ? ` · 上限 ${a.capacity}` : ""}</small>` : ""}</button><button type="button" class="column-move" data-move-appliance="${esc(a.id)}" aria-label="左右拖动排序${esc(resourceLabel(a))}" title="左右拖动排序">⠿</button><span class="column-resize" data-resize-appliance="${esc(a.id)}" role="separator" tabindex="0" aria-label="调整${esc(resourceLabel(a))}列宽" aria-orientation="vertical" aria-valuemin="${MIN_COLUMN_WIDTH}" aria-valuemax="${MAX_COLUMN_WIDTH}" aria-valuenow="${Math.round(widths[i])}"></span></div>`).join("") + '<div class="add-appliance-cell"><button id="addAppliance" type="button" aria-label="添加器具或人员" title="添加器具或人员">＋</button></div>';
   $("addAppliance").onclick = () => openAppliance();
   const firstHour = Math.ceil(start / 60) * 60;
   $("timeAxis").innerHTML = Array.from({ length: Math.max(0, Math.ceil((end - firstHour) / 60)) }, (_, index) => {
@@ -207,6 +214,19 @@ function render() {
       document.querySelectorAll("[data-resize-appliance]").forEach(next => { if (next.dataset.resizeAppliance === a.id) next.focus(); });
     });
   });
+  document.querySelectorAll("[data-move-appliance]").forEach(handle => {
+    handle.addEventListener("pointerdown", startColumnMove);
+    handle.addEventListener("keydown", e => {
+      if (!["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+      e.preventDefault();
+      const i = state.appliances.findIndex(a => a.id === handle.dataset.moveAppliance);
+      const to = Math.max(0, Math.min(state.appliances.length - 1, i + (e.key === "ArrowRight" ? 1 : -1)));
+      const [resource] = state.appliances.splice(i, 1);
+      state.appliances.splice(to, 0, resource);
+      save(); render();
+      document.querySelectorAll("[data-move-appliance]").forEach(next => { if (next.dataset.moveAppliance === resource.id) next.focus(); });
+    });
+  });
   updateNowLine();
 }
 function taskCard(task, layout) {
@@ -218,8 +238,8 @@ function taskCard(task, layout) {
   const title = `${display(task.name, "未命名步骤")} · ${display(task.dish, "未命名菜品")} ${task.start}–${task.end}${warning}`;
   return `<article class="task-card ${warning ? "capacity-conflict" : ""} ${height < 48 ? "short" : ""} ${task.done ? "done" : ""}" data-id="${esc(task.id)}" title="${esc(title)}" style="top:${top}px;height:${height}px;left:calc(${column / count * 100}% + ${count > 1 ? 1 : 4}px);width:calc(${100 / count}% - ${count > 1 ? 2 : 8}px);background:${COLORS[index % COLORS.length]}"><span class="resize-handle top" data-edge="start" title="拖动调整开始时间"></span><button type="button" class="move-handle" data-edge="move" aria-label="拖动移动步骤">⠿</button><button type="button" class="check" aria-label="${task.done ? "标为待处理" : "标为完成"}">${task.done ? "✓" : ""}</button><strong>${esc(display(task.name, "未命名步骤"))}</strong><small>${task.start}–${task.end} · ${esc(display(task.dish, "未命名菜品"))}${task.note ? ` · ${esc(task.note)}` : ""}${warning ? " · 占用超限" : ""}</small><span class="resize-handle bottom" data-edge="end" title="拖动调整结束时间"></span></article>`;
 }
-// Adjacent start-time groups provide a visual sequence, not an extra dependency model.
-// Include every stage when building the chain so filters never invent a shortcut.
+// A predecessor must finish before this step starts. Tied latest finishes allow merges.
+// Include hidden tasks when choosing predecessors so filtering never invents shortcuts.
 function renderConnections() {
   const lanes = $("lanes");
   const bounds = lanes.getBoundingClientRect();
@@ -234,13 +254,10 @@ function renderConnections() {
   const paths = [];
   for (const dish of state.dishes) {
     const tasks = state.tasks.filter(t => t.dishId === dish.id && (t.appliances.length === 0 || t.appliances.some(id => !people.has(id)))).sort((a, b) => minutes(a.start) - minutes(b.start));
-    const groups = [];
-    for (const task of tasks) {
-      if (!groups.length || groups.at(-1)[0].start !== task.start) groups.push([]);
-      groups.at(-1).push(task);
-    }
-    for (let i = 1; i < groups.length; i++) {
-      for (const from of groups[i - 1]) for (const to of groups[i]) {
+    for (const to of tasks) {
+      const candidates = tasks.filter(from => from.id !== to.id && minutes(from.end) <= minutes(to.start));
+      const latestEnd = Math.max(-1, ...candidates.map(from => minutes(from.end)));
+      for (const from of candidates.filter(from => minutes(from.end) === latestEnd)) {
         for (const source of nodes.get(from.id) || []) for (const target of nodes.get(to.id) || []) {
           const y1 = source.bottom, y2 = target.top;
           const bend = Math.max(24, Math.abs(y2 - y1) * .45);
@@ -276,14 +293,15 @@ function startResize(event) {
   const initialY = event.clientY;
   const dragScale = hourHeight;
   const initialStart = minutes(task.start), initialEnd = minutes(task.end);
-  const minimumDuration = Math.min(5, initialEnd - initialStart);
-  const boundDelta = (delta, min, max) => Math.max(Math.ceil(min / 5) * 5, Math.min(Math.floor(max / 5) * 5, delta));
+  const step = state.dragStep || 5;
+  const minimumDuration = Math.min(step, initialEnd - initialStart);
+  const boundDelta = (delta, min, max) => Math.max(Math.ceil(min / step) * step, Math.min(Math.floor(max / step) * step, delta));
   const pointerId = event.pointerId;
   const planner = $("planner");
   planner.setPointerCapture(pointerId);
   const move = (e) => {
     if (e.pointerId !== pointerId) return;
-    const delta = Math.round((e.clientY - initialY) / dragScale * 60 / 5) * 5;
+    const delta = Math.round((e.clientY - initialY) / dragScale * 60 / step) * step;
     if (edge === "move") {
       const shift = boundDelta(delta, -initialStart, 1439 - initialEnd);
       task.start = addMinutes("00:00", initialStart + shift);
@@ -341,12 +359,68 @@ function startColumnResize(event) {
   document.addEventListener("pointerup", finish);
   document.addEventListener("pointercancel", finish);
 }
+function startColumnMove(event) {
+  if (!event.isPrimary || event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const id = event.currentTarget.dataset.moveAppliance;
+  const original = [...state.appliances];
+  const pointerId = event.pointerId, initialX = event.clientX;
+  let clientX = initialX, moving = false, frame;
+  const planner = $("planner"), wrap = document.querySelector(".planner-wrap");
+  planner.setPointerCapture(pointerId);
+  const update = () => {
+    if (!moving) return;
+    const otherHeads = [...document.querySelectorAll("[data-appliance-id]")].filter(el => el.dataset.applianceId !== id);
+    const to = otherHeads.filter(el => { const r = el.getBoundingClientRect(); return clientX > r.left + r.width / 2; }).length;
+    const from = state.appliances.findIndex(a => a.id === id);
+    if (from !== to) {
+      const [resource] = state.appliances.splice(from, 1);
+      state.appliances.splice(to, 0, resource);
+      render();
+    }
+  };
+  const scroll = () => {
+    if (moving) {
+      const r = wrap.getBoundingClientRect();
+      if (clientX < r.left + 28) wrap.scrollLeft -= 12;
+      else if (clientX > r.right - 28) wrap.scrollLeft += 12;
+      update();
+    }
+    frame = requestAnimationFrame(scroll);
+  };
+  const move = e => {
+    if (e.pointerId !== pointerId) return;
+    clientX = e.clientX;
+    if (!moving && Math.abs(clientX - initialX) > 6) { moving = true; draggedResourceId = id; }
+    update();
+  };
+  const finish = e => {
+    if (e.pointerId !== pointerId) return;
+    cancelAnimationFrame(frame);
+    document.removeEventListener("pointermove", move);
+    document.removeEventListener("pointerup", finish);
+    document.removeEventListener("pointercancel", finish);
+    document.removeEventListener("keydown", escape);
+    if (planner.hasPointerCapture(pointerId)) planner.releasePointerCapture(pointerId);
+    if (e.type === "pointercancel") state.appliances = original;
+    draggedResourceId = null;
+    save(); render();
+  };
+  const escape = e => { if (e.key === "Escape") { e.preventDefault(); finish({ pointerId, type: "pointercancel" }); } };
+  document.addEventListener("pointermove", move);
+  document.addEventListener("pointerup", finish);
+  document.addEventListener("pointercancel", finish);
+  document.addEventListener("keydown", escape);
+  frame = requestAnimationFrame(scroll);
+}
 function renderMenu() {
   const dish = state.dishes.find(d => d.id === selectedDishId);
   if (!dish) selectedDishId = null;
   $("menuTitle").textContent = dish ? display(dish.name, "未命名菜品") : "菜单";
   for (const id of ["menuBack", "dishForm", "deleteDish", "addDishTask"]) $(id).hidden = !dish;
   $("addDish").hidden = Boolean(dish);
+  $("openTransfer").hidden = Boolean(dish);
   if (dish) {
     // Keep a name draft through viewport/keyboard changes, even after blur.
     if ($("dishName").dataset.editing !== dish.id) {
@@ -457,7 +531,7 @@ $("deleteDish").onclick = () => {
   state.dishes = state.dishes.filter(d => d.id !== selectedDishId);
   selectedDishId = null; save(); render();
 };
-$("setTimelineStart").onclick = () => { $("timelineStart").value = state.timelineStart; $("timelineEnd").value = state.timelineEnd; $("timelineError").textContent = ""; $("timelineDialog").showModal(); };
+$("setTimelineStart").onclick = () => { $("timelineStart").value = state.timelineStart; $("timelineEnd").value = state.timelineEnd; $("timelineScale").value = String(state.visibleHours || 2.5); $("timelineStep").value = String(state.dragStep || 5); $("timelineError").textContent = ""; $("timelineDialog").showModal(); };
 document.querySelectorAll("[data-close-dialog]").forEach(button => button.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); closeDialog(button.dataset.closeDialog); }));
 document.querySelectorAll("dialog").forEach(dialog => dialog.addEventListener("click", (e) => { if (e.target !== dialog) return;
   const box = dialog.getBoundingClientRect();
@@ -501,9 +575,13 @@ $("timelineForm").addEventListener("submit", (e) => {
     $("timelineError").textContent = "结束时间必须晚于起始时间";
     return;
   }
-  state.timelineStart = start;
-  state.timelineEnd = end;
+  const visibleHours = Number($("timelineScale").value), dragStep = Number($("timelineStep").value);
+  if (!SCALES.includes(visibleHours) || !DRAG_STEPS.includes(dragStep)) return;
+  const wrap = document.querySelector(".planner-wrap");
+  const position = start === state.timelineStart && end === state.timelineEnd ? wrap.scrollTop / hourHeight : 0;
+  Object.assign(state, { timelineStart: start, timelineEnd: end, visibleHours, dragStep });
   closeDialog("timelineDialog"); save(); render();
+  wrap.scrollTop = position * hourHeight;
 });
 $("deleteTask").onclick = () => {
   if (!confirm("删除这个步骤？")) return;
@@ -518,6 +596,130 @@ $("resetDemo").onclick = () => { if (confirm("恢复示例排程？当前数据�
     t.dishId = dish.id;
   });
   selectedDishId = null; save(); render(); } };
+// Compact, versioned, compressed clipboard format. All processing stays in the browser.
+function packPlan(plan) {
+  const resources = new Map(plan.appliances.map((a, i) => [a.id, i]));
+  const dishes = new Map(plan.dishes.map((d, i) => [d.id, i]));
+  return [1, minutes(plan.timelineStart), minutes(plan.timelineEnd), plan.visibleHours || 2.5, plan.dragStep || 5,
+    plan.appliances.map(a => [a.name, a.icon, a.width || 0, a.capacity || 0]),
+    plan.dishes.map(d => d.name),
+    plan.tasks.map(t => [t.name, dishes.get(t.dishId), minutes(t.start), minutes(t.end), t.appliances.map(id => resources.get(id)), t.note, t.done ? 1 : 0])];
+}
+function unpackPlan(data) {
+  const bad = () => { throw new Error("传输文本的内容不完整或格式不正确"); };
+  if (!Array.isArray(data) || data.length !== 8 || data[0] !== 1) return bad();
+  const [, start, end, visibleHours, dragStep, resources, dishes, tasks] = data;
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end > 1439 || start >= end || !SCALES.includes(visibleHours) || !DRAG_STEPS.includes(dragStep)) return bad();
+  if (!Array.isArray(resources) || resources.length > 1000 || !Array.isArray(dishes) || dishes.length > 5000 || !dishes.every(d => typeof d === "string") || !Array.isArray(tasks) || tasks.length > 20000) return bad();
+  if (!resources.every(a => Array.isArray(a) && a.length === 4 && typeof a[0] === "string" && typeof a[1] === "string" && Number.isFinite(a[2]) && (a[2] === 0 || a[2] >= MIN_COLUMN_WIDTH && a[2] <= MAX_COLUMN_WIDTH) && [0, 1, 2, 3].includes(a[3]))) return bad();
+  if (!tasks.every(t => Array.isArray(t) && t.length === 7 && typeof t[0] === "string" && Number.isInteger(t[1]) && t[1] >= 0 && t[1] < dishes.length && Number.isInteger(t[2]) && Number.isInteger(t[3]) && t[2] >= 0 && t[3] <= 1439 && t[2] < t[3] && Array.isArray(t[4]) && new Set(t[4]).size === t[4].length && t[4].every(i => Number.isInteger(i) && i >= 0 && i < resources.length) && typeof t[5] === "string" && [0, 1].includes(t[6]))) return bad();
+  const plan = {
+    resourceIconVersion: 1, timelineStart: addMinutes("00:00", start), timelineEnd: addMinutes("00:00", end), visibleHours, dragStep,
+    appliances: resources.map(a => ({ id: `a${crypto.randomUUID()}`, name: a[0], icon: a[1], ...(a[2] ? { width: a[2] } : {}), capacity: a[3] })),
+    dishes: dishes.map(name => ({ id: `d${crypto.randomUUID()}`, name }))
+  };
+  plan.tasks = tasks.map(t => ({ id: `t${crypto.randomUUID()}`, name: t[0], dishId: plan.dishes[t[1]].id, dish: dishes[t[1]], start: addMinutes("00:00", t[2]), end: addMinutes("00:00", t[3]), appliances: t[4].map(i => plan.appliances[i].id), note: t[5], done: Boolean(t[6]) }));
+  if (!validState(plan)) return bad();
+  return plan;
+}
+async function encodePlan(plan) {
+  if (typeof CompressionStream === "undefined") throw new Error("此浏览器暂不支持压缩传输，请使用新版浏览器");
+  const raw = new TextEncoder().encode(JSON.stringify(packPlan(plan)));
+  if (raw.length > 1048576) throw new Error("排程过大，暂无法生成传输文本");
+  const compressed = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer());
+  let binary = "";
+  for (const byte of compressed) binary += String.fromCharCode(byte);
+  const token = "MC1." + btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  if (token.length > 200000) throw new Error("排程过大，暂无法生成传输文本");
+  return token;
+}
+async function decodePlan(text) {
+  if (typeof DecompressionStream === "undefined") throw new Error("此浏览器暂不支持压缩传输，请使用新版浏览器");
+  const token = text.replace(/\s/g, "");
+  if (token.length > 200000 || !/^MC1\.[A-Za-z0-9_-]+$/.test(token)) throw new Error("请粘贴完整的 MC1. 排程文本");
+  try {
+    const base64 = token.slice(4).replace(/-/g, "+").replace(/_/g, "/");
+    const bytes = Uint8Array.from(atob(base64 + "=".repeat((4 - base64.length % 4) % 4)), c => c.charCodeAt(0));
+    const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip")).getReader();
+    const chunks = [];
+    let size = 0;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > 1048576) { await reader.cancel(); throw new Error("Too large"); }
+      chunks.push(value);
+    }
+    const buffer = new Uint8Array(size);
+    let offset = 0;
+    chunks.forEach(chunk => { buffer.set(chunk, offset); offset += chunk.length; });
+    return unpackPlan(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(buffer)));
+  } catch {
+    throw new Error("传输文本无效、已损坏或内容过大，请重新复制完整文本");
+  }
+}
+let pendingImport = null;
+function transferMessage(message, error = false) {
+  $("transferStatus").textContent = message;
+  $("transferStatus").classList.toggle("save-error", error);
+}
+$("openTransfer").onclick = () => {
+  pendingImport = null;
+  for (const id of ["exportText", "importText"]) $(id).value = "";
+  $("confirmImport").hidden = true;
+  $("importPreview").hidden = true;
+  transferMessage("");
+  $("transferDialog").showModal();
+};
+$("exportPlan").onclick = async () => {
+  $("exportPlan").disabled = true;
+  try {
+    const token = await encodePlan(structuredClone(state));
+    $("exportText").value = token;
+    try {
+      await navigator.clipboard.writeText(token);
+      transferMessage(`已复制压缩文本（${token.length} 字符），可粘贴到另一台设备。`);
+    } catch {
+      $("exportText").focus(); $("exportText").select();
+      transferMessage(`已生成压缩文本（${token.length} 字符），请长按或选中文本复制。`);
+    }
+  } catch (error) { transferMessage(error.message, true); }
+  finally { $("exportPlan").disabled = false; }
+};
+$("importText").oninput = () => {
+  pendingImport = null;
+  $("confirmImport").hidden = true;
+  $("importPreview").hidden = true;
+  transferMessage("");
+};
+$("previewImport").onclick = async () => {
+  const text = $("importText").value;
+  pendingImport = null;
+  $("confirmImport").hidden = true;
+  $("importPreview").hidden = true;
+  $("previewImport").disabled = true;
+  try {
+    const plan = await decodePlan(text);
+    if (text !== $("importText").value) { transferMessage("文本已改变，请重新检查。", true); return; }
+    pendingImport = { plan, text };
+    $("importPreview").textContent = `${plan.dishes.length} 道菜品、${plan.tasks.length} 个步骤、${plan.appliances.length} 个器具或人员。导入将替换当前排程，建议先复制导出文本作为备份。`;
+    $("importPreview").hidden = false;
+    $("confirmImport").hidden = false;
+    transferMessage("内容检查通过，尚未替换当前排程。");
+  } catch (error) { transferMessage(error.message, true); }
+  finally { $("previewImport").disabled = false; }
+};
+$("confirmImport").onclick = () => {
+  if (!pendingImport || pendingImport.text !== $("importText").value) return;
+  const next = pendingImport.plan;
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); }
+  catch { transferMessage("浏览器缓存无法保存，原排程未改动。请先备份或清理空间。", true); return; }
+  state = next; pendingImport = null; selectedDishId = null; filter = "all"; storageWarning = "";
+  document.querySelectorAll(".filter").forEach(button => button.classList.toggle("active", button.dataset.filter === "all"));
+  closeDialog("transferDialog"); closeDialog("menuDialog"); render();
+  const wrap = document.querySelector(".planner-wrap"); wrap.scrollTop = 0; wrap.scrollLeft = 0;
+};
+
 window.addEventListener("resize", render);
 render();
 setInterval(updateNowLine, 30000);

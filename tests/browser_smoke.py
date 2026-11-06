@@ -408,6 +408,186 @@ def test_unassigned_and_links(browser, url, errors):
     print('PASS: unassigned lane, icon-only unnamed headers, visible people choices, branching/merging tool-only curves, filtering, resizing and dragging')
 
 
+def test_sequence_and_settings(browser, url, errors):
+    context = browser.new_context(viewport={'width': 1280, 'height': 1000})
+    page = context.new_page()
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    page.goto(url)
+    page.locator('.task-card .check').first.click()
+    data = plan(page)
+    template = data['tasks'][0]
+    data['timelineStart'], data['timelineEnd'] = '16:00', '19:00'
+    data['tasks'] = [{**template, 'id': id, 'name': name, 'start': start, 'end': end, 'appliances': [tool], 'done': False} for id, name, start, end, tool in [
+        ('marinate', '腌制排骨', '15:30', '17:00', 'stove'),
+        ('tray', '放在烤盘里', '17:05', '18:05', 'steamer'),
+        ('roast', '烤制排骨', '17:15', '17:50', 'oven')]]
+    page.evaluate('([k,v]) => localStorage.setItem(k, JSON.stringify(v))', [KEY, data])
+    page.reload()
+    assert page.locator('[data-from-id="marinate"][data-to-id="roast"]').count() == 1
+    assert page.locator('[data-from-id="marinate"][data-to-id="tray"]').count() == 1
+    assert page.locator('[data-from-id="tray"][data-to-id="roast"]').count() == 0
+    old_scale = scale(page)
+    page.locator('#setTimelineStart').click()
+    page.locator('#timelineScale').select_option('1')
+    page.locator('#timelineStep').select_option('15')
+    page.locator('#timelineForm button[type="submit"]').click()
+    assert abs(scale(page) / old_scale - 2.5) < .01
+    drag(page, page.locator('[data-id="roast"] .move-handle'), scale(page)/12)
+    assert next(t for t in plan(page)['tasks'] if t['id'] == 'roast')['start'] == '17:15'
+    drag(page, page.locator('[data-id="roast"] .move-handle'), scale(page)/4)
+    assert next(t for t in plan(page)['tasks'] if t['id'] == 'roast')['start'] == '17:30'
+    page.reload()
+    assert plan(page)['visibleHours'] == 1 and plan(page)['dragStep'] == 15
+    assert page.locator('[data-from-id="marinate"][data-to-id="roast"]').count() == 1
+    # Column order is independent from the resource IDs used by each step.
+    before = plan(page)
+    handle = page.locator('.column-move').first
+    handle.scroll_into_view_if_needed()
+    source, target = handle.bounding_box(), page.locator('.appliance-head').nth(1).bounding_box()
+    x, y = source['x'] + source['width']/2, source['y'] + source['height']/2
+    page.mouse.move(x, y); page.mouse.down()
+    page.mouse.move(target['x'] + target['width']*.75, y, steps=8); page.mouse.up()
+    after = plan(page)
+    assert [a['id'] for a in after['appliances']][:2] == [a['id'] for a in before['appliances']][:2][::-1]
+    assert after['tasks'] == before['tasks']
+    assert not page.locator('#applianceDialog').evaluate('(d) => d.open')
+    page.reload()
+    assert [a['id'] for a in plan(page)['appliances']] == [a['id'] for a in after['appliances']]
+    # Escape cancels an in-progress reorder.
+    handle = page.locator('.column-move').first
+    box = handle.bounding_box()
+    page.mouse.move(box['x'] + box['width']/2, box['y'] + box['height']/2)
+    page.mouse.down(); page.mouse.move(box['x'] + 400, box['y'] + box['height']/2, steps=8)
+    page.keyboard.press('Escape'); page.mouse.up()
+    assert plan(page)['appliances'] == after['appliances']
+    page.locator('.column-move').first.focus(); page.keyboard.press('ArrowRight')
+    assert [a['id'] for a in plan(page)['appliances']][:2] == [a['id'] for a in before['appliances']][:2]
+    assert page.locator('.unassigned-head').count() == 1
+    assert not errors, errors
+    context.close()
+    # Real mobile touch reorders columns without opening their settings.
+    context = browser.new_context(viewport={'width': 375, 'height': 812}, is_mobile=True, has_touch=True)
+    page = context.new_page()
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    page.goto(url)
+    page.locator('.task-card .check').first.click()
+    order = [a['id'] for a in plan(page)['appliances']]
+    handle = page.locator('.column-move').first
+    box, target = handle.bounding_box(), page.locator('.appliance-head').nth(1).bounding_box()
+    touch = {'x': box['x']+box['width']/2, 'y': box['y']+box['height']/2}
+    session = context.new_cdp_session(page)
+    session.send('Input.dispatchTouchEvent', {'type':'touchStart','touchPoints':[touch]})
+    touch['x'] = target['x']+target['width']*.75
+    session.send('Input.dispatchTouchEvent', {'type':'touchMove','touchPoints':[touch]})
+    session.send('Input.dispatchTouchEvent', {'type':'touchEnd','touchPoints':[]})
+    assert [a['id'] for a in plan(page)['appliances']][:2] == order[:2][::-1]
+    assert not page.locator('#applianceDialog').evaluate('(d) => d.open')
+    # Holding near the mobile edge scrolls across columns; touch cancellation restores order.
+    data = plan(page)
+    data['appliances'].extend([{**data['appliances'][0], 'id': f'extra{i}'} for i in range(4)])
+    page.evaluate('([k,v]) => localStorage.setItem(k, JSON.stringify(v))', [KEY, data])
+    page.reload()
+    order = [a['id'] for a in plan(page)['appliances']]
+    box = page.locator('.column-move').first.bounding_box()
+    wrap = page.locator('.planner-wrap').bounding_box()
+    touch = {'x':box['x']+box['width']/2,'y':box['y']+box['height']/2}
+    session.send('Input.dispatchTouchEvent', {'type':'touchStart','touchPoints':[touch]})
+    touch['x'] = wrap['x']+wrap['width']-6
+    session.send('Input.dispatchTouchEvent', {'type':'touchMove','touchPoints':[touch]})
+    page.wait_for_function('document.querySelector(".planner-wrap").scrollLeft > 40')
+    page.wait_for_function('(id) => state.appliances.findIndex(a => a.id === id) > 1', arg=order[0])
+    session.send('Input.dispatchTouchEvent', {'type':'touchCancel','touchPoints':[]})
+    assert [a['id'] for a in plan(page)['appliances']] == order
+    assert not errors, errors
+    context.close()
+    print('PASS: screenshot regression, finished predecessors only, custom scale/step, desktop/touch/keyboard column order and cancellation')
+
+
+def semantic_plan(data):
+    resources = {a['id']: i for i, a in enumerate(data['appliances'])}
+    dishes = {d['id']: i for i, d in enumerate(data['dishes'])}
+    return {
+        'range': [data['timelineStart'], data['timelineEnd']],
+        'scale': data.get('visibleHours', 2.5), 'step': data.get('dragStep', 5),
+        'resources': [[a['name'], a['icon'], a.get('width', 0), a.get('capacity', 0)] for a in data['appliances']],
+        'dishes': [d['name'] for d in data['dishes']],
+        'tasks': [[t['name'], dishes[t['dishId']], t['start'], t['end'], [resources[id] for id in t['appliances']], t['note'], t['done']] for t in data['tasks']]
+    }
+
+
+def test_transfer(browser, url, errors):
+    context = browser.new_context(permissions=['clipboard-read', 'clipboard-write'])
+    page = context.new_page()
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    page.goto(url)
+    page.locator('.task-card .check').first.click()
+    source = plan(page)
+    source['visibleHours'], source['dragStep'] = 3, 10
+    source['appliances'].reverse()
+    source['appliances'][0]['width'], source['appliances'][0]['capacity'] = 193, 2
+    source['appliances'].append({'id':'chef','name':'小敏👩🏻‍🍳','icon':'👩🏻‍🍳','capacity':1})
+    source['tasks'][0]['appliances'].append('chef')
+    source['tasks'][0]['note'] = '中文、瑞典语 köttbullar、emoji 🍲 和 <文字>'
+    source['tasks'][1]['appliances'] = []
+    source['dishes'].extend([{'id':'empty1','name':''},{'id':'empty2','name':''}])
+    page.evaluate('([k,v]) => localStorage.setItem(k, JSON.stringify(v))', [KEY, source])
+    page.reload(); page.locator('#manageMenu').click(); page.locator('#openTransfer').click()
+    page.locator('#exportPlan').click()
+    page.wait_for_function('document.querySelector("#exportText").value.startsWith("MC1.")')
+    token = page.locator('#exportText').input_value()
+    page.wait_for_function('!document.querySelector("#exportPlan").disabled')
+    assert page.evaluate('navigator.clipboard.readText()') == token
+    assert len(token) < len(json.dumps(source, ensure_ascii=False).encode()) / 2
+    # Clipboard denial leaves a selectable text fallback.
+    page.evaluate('() => { navigator.clipboard.writeText = async () => { throw new Error("Denied"); }; }')
+    page.locator('#exportPlan').click()
+    page.wait_for_function('!document.querySelector("#exportPlan").disabled')
+    assert '请长按' in page.locator('#transferStatus').inner_text()
+    assert page.locator('#exportText').input_value() == token
+    other = browser.new_context()
+    dest = other.new_page()
+    dest.on('pageerror', lambda e: errors.append(str(e)))
+    dest.goto(url); dest.locator('.task-card .check').first.click()
+    before = plan(dest)
+    dest.locator('#manageMenu').click(); dest.locator('#openTransfer').click()
+    # Wrapped text from messaging apps remains importable; preview never commits it.
+    dest.locator('#importText').fill(token[:20]+'\n'+token[20:])
+    dest.locator('#previewImport').click()
+    dest.locator('#confirmImport').wait_for(state='visible')
+    assert plan(dest) == before
+    assert '尚未替换' in dest.locator('#transferStatus').inner_text()
+    dest.locator('#importText').fill('MC1.broken')
+    assert dest.locator('#confirmImport').is_hidden()
+    dest.locator('#previewImport').click()
+    dest.wait_for_function('!document.querySelector("#previewImport").disabled')
+    assert '无效' in dest.locator('#transferStatus').inner_text()
+    assert plan(dest) == before
+    # Reject valid gzip with invalid references and oversized decompressed content.
+    import gzip, base64
+    bad_payload = [1,600,1020,2.5,5,[],[],[['坏步骤',9,600,630,[],'',0]]]
+    bad_token = 'MC1.' + base64.urlsafe_b64encode(gzip.compress(json.dumps(bad_payload).encode())).decode().rstrip('=')
+    bomb = 'MC1.' + base64.urlsafe_b64encode(gzip.compress(b'A'*1048577)).decode().rstrip('=')
+    for invalid in [bad_token, bomb, token[:-8]]:
+        dest.locator('#importText').fill(invalid); dest.locator('#previewImport').click()
+        dest.wait_for_function('!document.querySelector("#previewImport").disabled')
+        assert dest.locator('#confirmImport').is_hidden()
+        assert plan(dest) == before
+    dest.locator('#importText').fill(token); dest.locator('#previewImport').click()
+    dest.locator('#confirmImport').wait_for(state='visible')
+    dest.evaluate('() => { window.originalSet = Storage.prototype.setItem; Storage.prototype.setItem = () => { throw new Error("Quota"); }; }')
+    dest.locator('#confirmImport').click()
+    assert '原排程未改动' in dest.locator('#transferStatus').inner_text()
+    assert plan(dest) == before
+    dest.evaluate('() => { Storage.prototype.setItem = window.originalSet; }')
+    dest.locator('#confirmImport').click()
+    assert semantic_plan(plan(dest)) == semantic_plan(source)
+    dest.reload()
+    assert semantic_plan(plan(dest)) == semantic_plan(source)
+    assert not errors, errors
+    other.close(); context.close()
+    print(f'PASS: compressed text ({len(token)} chars), clipboard/fallback, cross-device restore, Unicode, invalid/oversized imports, preview and storage failure safety')
+
+
 def run():
     server = ThreadingHTTPServer(('127.0.0.1', 0), partial(QuietHandler, directory=str(ROOT)))
     Thread(target=server.serve_forever, daemon=True).start()
@@ -577,6 +757,8 @@ def run():
             test_appliance_capacity(browser, url, errors)
             test_people(browser, url, errors)
             test_unassigned_and_links(browser, url, errors)
+            test_sequence_and_settings(browser, url, errors)
+            test_transfer(browser, url, errors)
             browser.close()
             print('PASS: mobile layout and real touch resizing; no JavaScript errors')
     finally:

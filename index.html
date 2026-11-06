@@ -46,7 +46,7 @@
           </div>
         </section>
         <div class="timeline-footer"><button id="setTimelineStart" type="button" class="time-settings" aria-label="设置时间范围" title="设置时间范围"><span aria-hidden="true">⚙</span><svg aria-hidden="true" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l3 2"/></svg></button><span id="capacityStatus" role="status"></span></div>
-<div class="page-notes"><p class="hint">拖动 ⠿ 移动步骤，上下边缘调整时长；菜单中可查看全部步骤。<span id="saveState" role="status">排程会自动保存在当前浏览器的缓存中。</span></p></div>
+<div class="page-notes"><p class="hint">拖动表头 ⠿ 调整列序，拖动卡片 ⠿ 移动步骤，上下边缘调整时长。<span id="saveState" role="status">排程会自动保存在当前浏览器的缓存中。</span></p></div>
       </main>
     </div>
 
@@ -85,7 +85,9 @@
     <dialog id="timelineDialog" class="modal">
       <form id="timelineForm">
         <div class="modal-head"><div><p class="eyebrow accent">时间轴</p><h3>设置时间范围</h3></div><button class="icon-button" type="button" data-close-dialog="timelineDialog" aria-label="关闭">×</button></div>
-        <div class="form-grid"><label>起始时间<input id="timelineStart" type="time" required /></label><label>结束时间<input id="timelineEnd" type="time" required /></label></div><p id="timelineError" role="alert" class="save-error"></p>
+        <div class="form-grid"><label>起始时间<input id="timelineStart" type="time" required /></label><label>结束时间<input id="timelineEnd" type="time" required /></label></div>
+        <label>设置轴的比例尺<select id="timelineScale"><option value="1">每屏 1 小时</option><option value="2">每屏 2 小时</option><option value="2.5">每屏 2.5 小时</option><option value="3">每屏 3 小时</option><option value="4">每屏 4 小时</option><option value="6">每屏 6 小时</option></select></label>
+        <label>设置拖动步进<select id="timelineStep"><option value="1">1 分钟</option><option value="5">5 分钟</option><option value="10">10 分钟</option><option value="15">15 分钟</option><option value="30">30 分钟</option></select></label><p id="timelineError" role="alert" class="save-error"></p>
         <div class="modal-actions"><button class="button button-quiet" type="button" data-close-dialog="timelineDialog">取消</button><button class="button button-primary" type="submit">保存</button></div>
       </form>
     </dialog>
@@ -94,7 +96,18 @@
       <div class="modal-head"><div class="menu-heading"><button type="button" id="menuBack" class="button button-quiet" hidden>‹ 菜单</button><h3 id="menuTitle">菜单</h3></div><button class="icon-button" type="button" data-close-dialog="menuDialog" aria-label="关闭">×</button></div>
       <form id="dishForm" hidden><label>菜品名称<input id="dishName" placeholder="可不填" /></label><button class="button button-outline" type="submit">保存名称</button></form>
       <div id="menuList" class="menu-list"></div>
-      <div class="modal-actions"><button id="deleteDish" class="button button-danger" type="button" hidden>删除菜品</button><button id="addDish" class="button button-primary" type="button">＋ 菜品</button><button id="addDishTask" class="button button-primary" type="button" hidden>＋ 步骤</button></div>
+      <div class="modal-actions"><button id="deleteDish" class="button button-danger" type="button" hidden>删除菜品</button><button id="openTransfer" class="button button-outline" type="button">导入 / 导出</button><button id="addDish" class="button button-primary" type="button">＋ 菜品</button><button id="addDishTask" class="button button-primary" type="button" hidden>＋ 步骤</button></div>
+    </dialog>
+    <dialog id="transferDialog" class="modal">
+      <div class="modal-head"><h3>导入 / 导出</h3><button class="icon-button" type="button" data-close-dialog="transferDialog" aria-label="关闭">×</button></div>
+      <p class="empty-state">将压缩文本复制到另一台设备，可转移全部菜品、步骤、器具、人力和设置。</p>
+      <button id="exportPlan" class="button button-outline" type="button">生成并复制排程文本</button>
+      <label>导出文本<textarea id="exportText" rows="3" readonly aria-label="导出文本"></textarea></label>
+      <label>粘贴要导入的文本<textarea id="importText" rows="3" spellcheck="false" placeholder="MC1.…"></textarea></label>
+      <button id="previewImport" class="button button-outline" type="button">检查导入内容</button>
+      <p id="transferStatus" role="status" class="empty-state"></p>
+      <p id="importPreview" hidden></p>
+      <button id="confirmImport" class="button button-primary" type="button" hidden>替换当前排程</button>
     </dialog>
     <script src="app.js"></script>
   </body>

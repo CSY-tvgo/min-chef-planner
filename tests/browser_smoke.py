@@ -47,7 +47,7 @@ def set_range(page, start, end):
 
 
 def resize_column(page, delta):
-    handle = page.locator('.column-resize').first
+    handle = page.locator('[data-resize-appliance]').first
     handle.scroll_into_view_if_needed()
     box = handle.bounding_box()
     x, y = box['x'] + box['width']/2, box['y'] + box['height']/2
@@ -195,7 +195,7 @@ def test_appliance_capacity(browser, url, errors):
     assert all(a['icon'] == expected[a['id']] for a in data['appliances'] if a['id'] in expected)
     page.reload()
     assert all(a['icon'] == expected[a['id']] for a in plan(page)['appliances'] if a['id'] in expected)
-    assert '排程会自动保存在当前浏览器的缓存中。' in page.locator('.page-notes .hint').inner_text()
+    assert '排程会自动保存在当前浏览器的缓存中。' in page.locator('#helpDialog #saveState').inner_text()
     assert '已自动保存' not in page.locator('body').inner_text()
     tool = data['appliances'][0]
     template = data['tasks'][0]
@@ -335,7 +335,8 @@ def test_unassigned_and_links(browser, url, errors):
     page = context.new_page()
     page.on('pageerror', lambda e: errors.append(str(e)))
     page.goto(url)
-    assert page.locator('.page-notes #saveState').count() == 1
+    assert page.locator('#helpDialog #saveState').count() == 1
+    assert page.locator('.page-notes').count() == 0
     assert page.locator('.top-actions #saveState').count() == 0
     page.locator('.task-card .check').first.click()
     data = plan(page)
@@ -509,6 +510,7 @@ def semantic_plan(data):
     return {
         'range': [data['timelineStart'], data['timelineEnd']],
         'scale': data.get('visibleHours', 2.5), 'step': data.get('dragStep', 5),
+        'unassigned_width': data.get('unassignedWidth', 0),
         'resources': [[a['name'], a['icon'], a.get('width', 0), a.get('capacity', 0)] for a in data['appliances']],
         'dishes': [d['name'] for d in data['dishes']],
         'tasks': [[t['name'], dishes[t['dishId']], t['start'], t['end'], [resources[id] for id in t['appliances']], t['note'], t['done']] for t in data['tasks']]
@@ -523,6 +525,7 @@ def test_transfer(browser, url, errors):
     page.locator('.task-card .check').first.click()
     source = plan(page)
     source['visibleHours'], source['dragStep'] = 3, 10
+    source['unassignedWidth'] = 177
     source['appliances'].reverse()
     source['appliances'][0]['width'], source['appliances'][0]['capacity'] = 193, 2
     source['appliances'].append({'id':'chef','name':'小敏👩🏻‍🍳','icon':'👩🏻‍🍳','capacity':1})
@@ -586,6 +589,16 @@ def test_transfer(browser, url, errors):
     assert semantic_plan(plan(dest)) == semantic_plan(source)
     dest.reload()
     assert semantic_plan(plan(dest)) == semantic_plan(source)
+    # Previously exported version-1 texts still load with default unassigned width.
+    old_payload = json.loads(gzip.decompress(base64.urlsafe_b64decode(token[4:]+'='*((4-len(token[4:])%4)%4))))
+    old_payload[0] = 1
+    old_payload = old_payload[:8]
+    legacy_token = 'MC1.' + base64.urlsafe_b64encode(gzip.compress(json.dumps(old_payload).encode())).decode().rstrip('=')
+    dest.locator('#manageMenu').click(); dest.locator('#openTransfer').click()
+    dest.locator('#importText').fill(legacy_token); dest.locator('#previewImport').click()
+    dest.locator('#confirmImport').wait_for(state='visible'); dest.locator('#confirmImport').click()
+    legacy_expected = semantic_plan(source); legacy_expected['unassigned_width'] = 0
+    assert semantic_plan(plan(dest)) == legacy_expected
     assert not errors, errors
     other.close(); context.close()
     print(f'PASS: compressed text ({len(token)} chars), clipboard/fallback, cross-device restore, Unicode, invalid/oversized imports, preview and storage failure safety')
@@ -759,7 +772,7 @@ def test_completion_links_and_compact_layout(browser, url, errors):
         assert page.locator('.summary').bounding_box()['height'] <= 27
         assert page.locator('.summary .stat').count() == 4
         assert page.locator('.summary strong').first.evaluate('(e)=>parseFloat(getComputedStyle(e).fontSize)') <= 17
-        assert page.locator('.page-notes').bounding_box()['y'] + page.locator('.page-notes').bounding_box()['height'] <= height
+        assert page.locator('.timeline-footer').bounding_box()['y'] + page.locator('.timeline-footer').bounding_box()['height'] <= height
         assert page.locator('.planner-wrap').bounding_box()['height'] >= 180
     page.set_viewport_size({'width':375,'height':812})
     page.wait_for_function('innerWidth===375 && document.documentElement.scrollHeight<=innerHeight+2')
@@ -772,6 +785,85 @@ def test_completion_links_and_compact_layout(browser, url, errors):
     assert not errors, errors
     context.close()
     print('PASS: screenshot bottom-to-bottom join, nested parents, clipping/filtering, compact four-stat overview and full portrait first screen including errors')
+
+
+def test_unassigned_width_and_help(browser, url, errors):
+    context = browser.new_context(viewport={'width':1280,'height':1000})
+    page = context.new_page()
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    page.goto(url)
+    assert page.locator('.unassigned-head [data-move-appliance], .unassigned-head .appliance-open').count()==0
+    original_width = page.locator('.unassigned-head').bounding_box()['width']
+    resource_widths = page.locator('.appliance-head').evaluate_all('(els)=>els.map(e=>e.getBoundingClientRect().width)')
+    handle = page.locator('[data-resize-unassigned]')
+    box = handle.bounding_box()
+    page.mouse.move(box['x']+box['width']/2,box['y']+box['height']/2); page.mouse.down()
+    page.mouse.move(box['x']+box['width']/2+55,box['y']+box['height']/2,steps=8); page.mouse.up()
+    assert abs(plan(page)['unassignedWidth']-original_width-55)<1
+    assert page.locator('.appliance-head').evaluate_all('(els)=>els.map(e=>e.getBoundingClientRect().width)')==resource_widths
+    assert abs(page.locator('.lane[data-unassigned]').bounding_box()['width']-plan(page)['unassignedWidth'])<1
+    saved_width=plan(page)['unassignedWidth']
+    page.reload()
+    assert abs(page.locator('.unassigned-head').bounding_box()['width']-saved_width)<1
+    page.locator('[data-resize-unassigned]').focus()
+    page.keyboard.press('ArrowRight'); page.keyboard.press('ArrowRight')
+    assert abs(plan(page)['unassignedWidth']-saved_width-20)<1
+    order=[a['id'] for a in plan(page)['appliances']]
+    title=page.locator('.unassigned-head strong').bounding_box()
+    page.mouse.move(title['x']+20,title['y']+5); page.mouse.down()
+    page.mouse.move(title['x']+200,title['y']+5,steps=8); page.mouse.up()
+    assert [a['id'] for a in plan(page)['appliances']]==order
+    assert page.locator('.unassigned-head').evaluate('(e)=>e.parentElement.firstElementChild===e')
+    # Reordering a real resource still cannot move it before the fixed column.
+    page.locator('.column-move').first.focus(); page.keyboard.press('ArrowRight')
+    assert page.locator('.unassigned-head').evaluate('(e)=>e.parentElement.firstElementChild===e')
+    assert abs(page.locator('.unassigned-head').bounding_box()['width']-saved_width-20)<1
+    context.close()
+    context=browser.new_context(viewport={'width':375,'height':812},is_mobile=True,has_touch=True)
+    page=context.new_page();page.on('pageerror',lambda e:errors.append(str(e)))
+    page.goto(url)
+    session=context.new_cdp_session(page)
+    def touch_resize(delta, cancel=False):
+        box=page.locator('[data-resize-unassigned]').bounding_box()
+        touch={'x':box['x']+box['width']/2,'y':box['y']+box['height']/2}
+        session.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[touch]})
+        touch['x']+=delta
+        session.send('Input.dispatchTouchEvent',{'type':'touchMove','touchPoints':[touch]})
+        session.send('Input.dispatchTouchEvent',{'type':'touchCancel' if cancel else 'touchEnd','touchPoints':[]})
+    width=page.locator('.unassigned-head').bounding_box()['width']
+    touch_resize(30,True)
+    assert abs(page.locator('.unassigned-head').bounding_box()['width']-width)<1
+    assert 'unassignedWidth' not in plan(page)
+    touch_resize(35)
+    assert abs(plan(page)['unassignedWidth']-width-35)<1
+    page.reload()
+    assert abs(page.locator('.lane[data-unassigned]').bounding_box()['width']-width-35)<1
+    page.locator('[data-resize-unassigned]').focus()
+    for _ in range(10): page.keyboard.press('ArrowLeft')
+    assert plan(page)['unassignedWidth']==64
+    assert page.locator('.page-notes').count()==0
+    assert '排程会自动保存' not in page.locator('body').inner_text()
+    gear=page.locator('#setTimelineStart').bounding_box();help=page.locator('#showHelp').bounding_box()
+    assert abs(gear['y']+gear['height']/2-help['y']-help['height']/2)<1
+    assert help['x']>gear['x'] and help['x']+help['width']>=page.evaluate('innerWidth')-15
+    page.locator('#showHelp').tap()
+    page.wait_for_timeout(350)  # A delayed touch click must not close the new dialog.
+    assert page.locator('#helpDialog').evaluate('(d)=>d.open')
+    assert page.locator('#helpDialog .help-list li').count()==5
+    assert len(page.locator('#helpDialog .help-list').inner_text())<220
+    assert '自动保存' in page.locator('#saveState').inner_text()
+    page.screenshot(path='/tmp/minchef-help-dialog.png')
+    page.locator('#helpDialog [data-close-dialog]').tap()
+    assert not page.locator('#helpDialog').evaluate('(d)=>d.open')
+    page.screenshot(path='/tmp/minchef-help-footer.png')
+    page.evaluate('() => { Storage.prototype.setItem = () => { throw new Error("Quota"); }; }')
+    page.locator('.task-card .check').first.tap()
+    assert page.locator('#saveAlert').is_visible()
+    assert '保存失败' in page.locator('#saveAlert').inner_text()
+    assert page.evaluate('document.documentElement.scrollHeight<=innerHeight+2')
+    assert not errors,errors
+    context.close()
+    print('PASS: fixed unassigned column width via mouse/touch/keyboard, cancellation, persistence, help-only instructions and visible save errors')
 
 
 def run():
@@ -922,7 +1014,7 @@ def run():
             session.send('Input.dispatchTouchEvent', {'type': 'touchCancel', 'touchPoints': []})
             assert next(t for t in plan(mobile)['tasks'] if t['id'] == 't2')['end'] == '12:05'
             # Column resizing also works with real touch, and only changes this appliance.
-            column = mobile.locator('.column-resize').first
+            column = mobile.locator('[data-resize-appliance]').first
             column.scroll_into_view_if_needed()
             before = mobile.locator('.appliance-head').evaluate_all('(els) => els.map(e => e.getBoundingClientRect().width)')
             box = column.bounding_box()
@@ -947,6 +1039,7 @@ def run():
             test_transfer(browser, url, errors)
             test_mobile_compatibility(browser, url, errors)
             test_completion_links_and_compact_layout(browser, url, errors)
+            test_unassigned_width_and_help(browser, url, errors)
             browser.close()
             print('PASS: mobile layout and real touch resizing; no JavaScript errors')
     finally:

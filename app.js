@@ -30,6 +30,7 @@ function validState(value) {
   if (!value || !Array.isArray(value.appliances) || !Array.isArray(value.tasks)) return false;
   if (value.visibleHours !== undefined && !SCALES.includes(value.visibleHours)) return false;
   if (value.dragStep !== undefined && !DRAG_STEPS.includes(value.dragStep)) return false;
+  if (value.unassignedWidth !== undefined && (!Number.isFinite(value.unassignedWidth) || value.unassignedWidth < MIN_COLUMN_WIDTH || value.unassignedWidth > MAX_COLUMN_WIDTH)) return false;
   const ids = new Set();
   for (const a of value.appliances) {
     if (!a || typeof a.id !== "string" || ids.has(a.id) || typeof a.name !== "string" || typeof a.icon !== "string" || (a.width !== undefined && (!Number.isFinite(a.width) || a.width < MIN_COLUMN_WIDTH || a.width > MAX_COLUMN_WIDTH))) return false;
@@ -92,6 +93,12 @@ let filter = "all";
 let timelineDuration = 0;
 let capacityConflicts = new Map();
 const $ = (id) => document.getElementById(id);
+function updateSaveStatus() {
+  $("saveState").textContent = storageWarning || SAVE_MESSAGE;
+  $("saveState").classList.toggle("save-error", Boolean(storageWarning));
+  $("saveAlert").textContent = storageWarning;
+  $("saveAlert").hidden = !storageWarning;
+}
 function save() {
   let saved = true;
   try {
@@ -101,8 +108,7 @@ function save() {
     saved = false;
     storageWarning = "保存失败，请勿关闭页面";
   }
-  $("saveState").textContent = storageWarning || SAVE_MESSAGE;
-  $("saveState").classList.toggle("save-error", Boolean(storageWarning));
+  updateSaveStatus();
   return saved;
 }
 function minutes(time) { const [h, m] = time.split(":").map(Number); return h * 60 + m; }
@@ -162,9 +168,7 @@ function findCapacityConflicts() {
 function sizeTimeline() {
   const wrap = document.querySelector(".planner-wrap");
   const footer = document.querySelector(".timeline-footer");
-  const notes = document.querySelector(".page-notes");
-  const bottomSpace = footer.getBoundingClientRect().height + notes.getBoundingClientRect().height
-    + parseFloat(getComputedStyle(notes).marginTop) + parseFloat(getComputedStyle(document.querySelector(".app-shell")).paddingBottom);
+  const bottomSpace = footer.getBoundingClientRect().height + parseFloat(getComputedStyle(document.querySelector(".app-shell")).paddingBottom);
   const height = Math.max(180, window.innerHeight - (wrap.getBoundingClientRect().top + window.scrollY) - bottomSpace - 2);
   wrap.style.height = `${height}px`;
   hourHeight = (height - 64) / (state.visibleHours || 2.5);
@@ -174,8 +178,7 @@ function render() {
   const start = minutes(state.timelineStart);
   capacityConflicts = findCapacityConflicts();
   $("capacityStatus").textContent = capacityConflicts.size ? `${capacityConflicts.size} 个步骤超出器具或人力容量` : "";
-  $("saveState").textContent = storageWarning || SAVE_MESSAGE;
-  $("saveState").classList.toggle("save-error", Boolean(storageWarning));
+  updateSaveStatus();
   const peopleCount = state.appliances.filter(isPerson).length;
   $("summary").innerHTML = `<div class="stat"><strong>${state.dishes.length}</strong><span>道菜品</span></div><div class="stat"><strong>${state.appliances.length - peopleCount}</strong><span>件器具</span></div>${peopleCount ? `<div class="stat"><strong>${peopleCount}</strong><span>位厨师</span></div>` : ""}<div class="stat"><strong>${state.tasks.filter(t => t.done).length}/${state.tasks.length}</strong><span>步骤完成</span></div>`;
   sizeTimeline();
@@ -188,8 +191,9 @@ function render() {
   const layouts = state.appliances.map(a => layoutTasks(visible.filter(t => t.appliances.includes(a.id))));
   const defaultWidth = Math.max(MIN_COLUMN_WIDTH, (document.querySelector(".planner-wrap").clientWidth - 28) / 4);
   const widths = state.appliances.map(a => a.width || defaultWidth);
-  $("planner").style.width = `calc(var(--sidebar) + ${widths.reduce((a, b) => a + b, 0) + defaultWidth + 48}px)`;
-  $("applianceHeads").innerHTML = `<div class="unassigned-head" style="flex-basis:${defaultWidth}px"><strong>无器具</strong><small>${state.tasks.filter(t => t.appliances.length === 0).length} 个步骤</small></div>` + state.appliances.map((a, i) => `<div class="appliance-head ${draggedResourceId === a.id ? "reordering" : ""}" data-appliance-id="${esc(a.id)}" style="flex-basis:${widths[i]}px"><button type="button" class="appliance-open ${a.name.trim() ? "" : "icon-only"}" data-open-appliance="${esc(a.id)}" aria-label="设置${esc(resourceLabel(a))}"><span class="tool-icon">${esc(a.icon)}</span>${a.name.trim() ? `<strong>${esc(a.name)}</strong><small>${state.tasks.filter(t => t.appliances.includes(a.id)).length} 个步骤${a.capacity ? ` · 上限 ${a.capacity}` : ""}</small>` : ""}</button><button type="button" class="column-move" data-move-appliance="${esc(a.id)}" aria-label="左右拖动排序${esc(resourceLabel(a))}" title="左右拖动排序">⠿</button><span class="column-resize" data-resize-appliance="${esc(a.id)}" role="separator" tabindex="0" aria-label="调整${esc(resourceLabel(a))}列宽" aria-orientation="vertical" aria-valuemin="${MIN_COLUMN_WIDTH}" aria-valuemax="${MAX_COLUMN_WIDTH}" aria-valuenow="${Math.round(widths[i])}"></span></div>`).join("") + '<div class="add-appliance-cell"><button id="addAppliance" type="button" aria-label="添加器具或人员" title="添加器具或人员">＋</button></div>';
+  const unassignedWidth = state.unassignedWidth || defaultWidth;
+  $("planner").style.width = `calc(var(--sidebar) + ${widths.reduce((a, b) => a + b, 0) + unassignedWidth + 48}px)`;
+  $("applianceHeads").innerHTML = `<div class="unassigned-head" style="flex-basis:${unassignedWidth}px"><strong>无器具</strong><small>${state.tasks.filter(t => t.appliances.length === 0).length} 个步骤</small><span class="column-resize" data-resize-unassigned role="separator" tabindex="0" aria-label="调整无器具列宽" aria-orientation="vertical" aria-valuemin="${MIN_COLUMN_WIDTH}" aria-valuemax="${MAX_COLUMN_WIDTH}" aria-valuenow="${Math.round(unassignedWidth)}"></span></div>` + state.appliances.map((a, i) => `<div class="appliance-head ${draggedResourceId === a.id ? "reordering" : ""}" data-appliance-id="${esc(a.id)}" style="flex-basis:${widths[i]}px"><button type="button" class="appliance-open ${a.name.trim() ? "" : "icon-only"}" data-open-appliance="${esc(a.id)}" aria-label="设置${esc(resourceLabel(a))}"><span class="tool-icon">${esc(a.icon)}</span>${a.name.trim() ? `<strong>${esc(a.name)}</strong><small>${state.tasks.filter(t => t.appliances.includes(a.id)).length} 个步骤${a.capacity ? ` · 上限 ${a.capacity}` : ""}</small>` : ""}</button><button type="button" class="column-move" data-move-appliance="${esc(a.id)}" aria-label="左右拖动排序${esc(resourceLabel(a))}" title="左右拖动排序">⠿</button><span class="column-resize" data-resize-appliance="${esc(a.id)}" role="separator" tabindex="0" aria-label="调整${esc(resourceLabel(a))}列宽" aria-orientation="vertical" aria-valuemin="${MIN_COLUMN_WIDTH}" aria-valuemax="${MAX_COLUMN_WIDTH}" aria-valuenow="${Math.round(widths[i])}"></span></div>`).join("") + '<div class="add-appliance-cell"><button id="addAppliance" type="button" aria-label="添加器具或人员" title="添加器具或人员">＋</button></div>';
   $("addAppliance").onclick = () => openAppliance();
   const firstHour = Math.ceil(start / 60) * 60;
   $("timeAxis").innerHTML = Array.from({ length: Math.max(0, Math.ceil((end - firstHour) / 60)) }, (_, index) => {
@@ -197,7 +201,7 @@ function render() {
     return `<div class="time-label" style="top:${(time - start) / 60 * hourHeight}px">${Math.floor(time / 60)}</div>`;
   }).join("");
   $("lanes").style.backgroundPositionY = `${(firstHour - start) / 60 * hourHeight}px`;
-  $("lanes").innerHTML = `<div class="lane" data-unassigned style="flex-basis:${defaultWidth}px">${unassigned.map(t => taskCard(t, unassignedLayout)).join("")}</div>` + state.appliances.map((a, i) => `<div class="lane" data-resource-id="${esc(a.id)}" data-person="${isPerson(a)}" style="flex-basis:${widths[i]}px">${visible.filter(t => t.appliances.includes(a.id)).map(t => taskCard(t, layouts[i])).join("")}</div>`).join("");
+  $("lanes").innerHTML = `<div class="lane" data-unassigned style="flex-basis:${unassignedWidth}px">${unassigned.map(t => taskCard(t, unassignedLayout)).join("")}</div>` + state.appliances.map((a, i) => `<div class="lane" data-resource-id="${esc(a.id)}" data-person="${isPerson(a)}" style="flex-basis:${widths[i]}px">${visible.filter(t => t.appliances.includes(a.id)).map(t => taskCard(t, layouts[i])).join("")}</div>`).join("");
   renderConnections();
   renderMenu();
   document.querySelectorAll("[data-open-appliance]").forEach(b => b.onclick = () => openAppliance(b.dataset.openAppliance));
@@ -210,15 +214,20 @@ function render() {
     };
     card.querySelectorAll(".resize-handle, .move-handle").forEach(handle => handle.addEventListener("pointerdown", startResize));
   });
-  document.querySelectorAll("[data-resize-appliance]").forEach(handle => {
+  document.querySelectorAll("[data-resize-appliance], [data-resize-unassigned]").forEach(handle => {
     handle.addEventListener("pointerdown", startColumnResize);
     handle.addEventListener("keydown", e => {
       if (!["ArrowLeft", "ArrowRight"].includes(e.key)) return;
       e.preventDefault();
-      const a = state.appliances.find(a => a.id === handle.dataset.resizeAppliance);
-      a.width = Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, handle.parentElement.getBoundingClientRect().width + (e.key === "ArrowRight" ? 10 : -10)));
+      const unassigned = handle.hasAttribute("data-resize-unassigned");
+      const target = unassigned ? state : state.appliances.find(a => a.id === handle.dataset.resizeAppliance);
+      const key = unassigned ? "unassignedWidth" : "width";
+      const id = handle.dataset.resizeAppliance;
+      target[key] = Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, handle.parentElement.getBoundingClientRect().width + (e.key === "ArrowRight" ? 10 : -10)));
       save(); render();
-      document.querySelectorAll("[data-resize-appliance]").forEach(next => { if (next.dataset.resizeAppliance === a.id) next.focus(); });
+      document.querySelectorAll("[data-resize-appliance], [data-resize-unassigned]").forEach(next => {
+        if (unassigned ? next.hasAttribute("data-resize-unassigned") : next.dataset.resizeAppliance === id) next.focus();
+      });
     });
   });
   document.querySelectorAll("[data-move-appliance], .appliance-open").forEach(handle => {
@@ -354,15 +363,17 @@ function startResize(event) {
 function startColumnResize(event) {
   if (!event.isPrimary || event.button !== 0) return;
   event.preventDefault();
-  const appliance = state.appliances.find(a => a.id === event.currentTarget.dataset.resizeAppliance);
-  const originalWidth = appliance.width;
+  const unassigned = event.currentTarget.hasAttribute("data-resize-unassigned");
+  const target = unassigned ? state : state.appliances.find(a => a.id === event.currentTarget.dataset.resizeAppliance);
+  const key = unassigned ? "unassignedWidth" : "width";
+  const originalWidth = target[key];
   const initialWidth = event.currentTarget.parentElement.getBoundingClientRect().width;
   const initialX = event.clientX, pointerId = event.pointerId;
   const planner = $("planner");
   planner.setPointerCapture(pointerId);
   const move = e => {
     if (e.pointerId !== pointerId) return;
-    appliance.width = Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, initialWidth + e.clientX - initialX));
+    target[key] = Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, initialWidth + e.clientX - initialX));
     render();
   };
   const finish = e => {
@@ -372,8 +383,8 @@ function startColumnResize(event) {
     document.removeEventListener("pointercancel", finish);
     if (planner.hasPointerCapture(pointerId)) planner.releasePointerCapture(pointerId);
     if (e.type === "pointercancel") {
-      if (originalWidth === undefined) delete appliance.width;
-      else appliance.width = originalWidth;
+      if (originalWidth === undefined) delete target[key];
+      else target[key] = originalWidth;
     }
     save(); render();
   };
@@ -548,6 +559,7 @@ function deleteAppliance(id) {
   state.appliances = state.appliances.filter(a => a.id !== id); state.tasks.forEach(t => t.appliances = t.appliances.filter(a => a !== id)); closeDialog("applianceDialog"); save(); render();
 }
 document.querySelectorAll(".filter").forEach(b => b.onclick = () => { filter = b.dataset.filter; document.querySelectorAll(".filter").forEach(x => x.classList.toggle("active", x === b)); render(); });
+$("showHelp").onclick = () => $("helpDialog").showModal();
 $("applianceIcon").onchange = updateResourceLabels;
 $("deleteAppliance").onclick = () => deleteAppliance($("applianceId").value);
 $("manageMenu").onclick = openMenu;
@@ -643,21 +655,22 @@ $("resetDemo").onclick = () => { if (confirm("恢复示例排程？当前数据�
 function packPlan(plan) {
   const resources = new Map(plan.appliances.map((a, i) => [a.id, i]));
   const dishes = new Map(plan.dishes.map((d, i) => [d.id, i]));
-  return [1, minutes(plan.timelineStart), minutes(plan.timelineEnd), plan.visibleHours || 2.5, plan.dragStep || 5,
+  return [2, minutes(plan.timelineStart), minutes(plan.timelineEnd), plan.visibleHours || 2.5, plan.dragStep || 5,
     plan.appliances.map(a => [a.name, a.icon, a.width || 0, a.capacity || 0]),
     plan.dishes.map(d => d.name),
-    plan.tasks.map(t => [t.name, dishes.get(t.dishId), minutes(t.start), minutes(t.end), t.appliances.map(id => resources.get(id)), t.note, t.done ? 1 : 0])];
+    plan.tasks.map(t => [t.name, dishes.get(t.dishId), minutes(t.start), minutes(t.end), t.appliances.map(id => resources.get(id)), t.note, t.done ? 1 : 0]), plan.unassignedWidth || 0];
 }
 function unpackPlan(data) {
   const bad = () => { throw new Error("传输文本的内容不完整或格式不正确"); };
-  if (!Array.isArray(data) || data.length !== 8 || data[0] !== 1) return bad();
-  const [, start, end, visibleHours, dragStep, resources, dishes, tasks] = data;
+  if (!Array.isArray(data) || !(data[0] === 1 && data.length === 8 || data[0] === 2 && data.length === 9)) return bad();
+  const [, start, end, visibleHours, dragStep, resources, dishes, tasks, unassignedWidth = 0] = data;
+  if (!Number.isFinite(unassignedWidth) || unassignedWidth !== 0 && (unassignedWidth < MIN_COLUMN_WIDTH || unassignedWidth > MAX_COLUMN_WIDTH)) return bad();
   if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end > 1439 || start >= end || !SCALES.includes(visibleHours) || !DRAG_STEPS.includes(dragStep)) return bad();
   if (!Array.isArray(resources) || resources.length > 1000 || !Array.isArray(dishes) || dishes.length > 5000 || !dishes.every(d => typeof d === "string") || !Array.isArray(tasks) || tasks.length > 20000) return bad();
   if (!resources.every(a => Array.isArray(a) && a.length === 4 && typeof a[0] === "string" && typeof a[1] === "string" && Number.isFinite(a[2]) && (a[2] === 0 || a[2] >= MIN_COLUMN_WIDTH && a[2] <= MAX_COLUMN_WIDTH) && [0, 1, 2, 3].includes(a[3]))) return bad();
   if (!tasks.every(t => Array.isArray(t) && t.length === 7 && typeof t[0] === "string" && Number.isInteger(t[1]) && t[1] >= 0 && t[1] < dishes.length && Number.isInteger(t[2]) && Number.isInteger(t[3]) && t[2] >= 0 && t[3] <= 1439 && t[2] < t[3] && Array.isArray(t[4]) && new Set(t[4]).size === t[4].length && t[4].every(i => Number.isInteger(i) && i >= 0 && i < resources.length) && typeof t[5] === "string" && [0, 1].includes(t[6]))) return bad();
   const plan = {
-    resourceIconVersion: 1, timelineStart: addMinutes("00:00", start), timelineEnd: addMinutes("00:00", end), visibleHours, dragStep,
+    resourceIconVersion: 1, timelineStart: addMinutes("00:00", start), timelineEnd: addMinutes("00:00", end), visibleHours, dragStep, ...(unassignedWidth ? { unassignedWidth } : {}),
     appliances: resources.map(a => ({ id: `a${crypto.randomUUID()}`, name: a[0], icon: a[1], ...(a[2] ? { width: a[2] } : {}), capacity: a[3] })),
     dishes: dishes.map(name => ({ id: `d${crypto.randomUUID()}`, name }))
   };

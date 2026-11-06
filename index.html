@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f6f7f2" />
     <title>Min Chef（敏捷厨师）</title>
-    <link rel="stylesheet" href="styles.css?v=42fe56b114a5" />
+    <link rel="stylesheet" href="styles.css?v=a1477185ab47" />
   </head>
   <body>
     <div class="app-shell">
@@ -45,8 +45,7 @@
             </div>
           </div>
         </section>
-        <div class="timeline-footer"><button id="setTimelineStart" type="button" class="time-settings" aria-label="设置时间范围" title="设置时间范围"><span aria-hidden="true">⚙</span><svg aria-hidden="true" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l3 2"/></svg></button><span id="capacityStatus" role="status"></span></div>
-<div class="page-notes"><p class="hint">表头 ⠿ 排序，卡片 ⠿ 调时，上下边缘改时长。<span id="saveState" role="status">排程会自动保存在当前浏览器的缓存中。</span></p></div>
+        <div class="timeline-footer"><button id="setTimelineStart" type="button" class="time-settings" aria-label="设置时间范围" title="设置时间范围"><span aria-hidden="true">⚙</span><svg aria-hidden="true" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l3 2"/></svg></button><div class="footer-messages"><span id="capacityStatus" role="status"></span><span id="saveAlert" role="status" class="save-error" hidden></span></div><button id="showHelp" type="button" class="help-button" aria-label="使用说明" title="使用说明">?</button></div>
       </main>
     </div>
 
@@ -110,7 +109,18 @@
       <p id="importPreview" hidden></p>
       <button id="confirmImport" class="button button-primary" type="button" hidden>替换当前排程</button>
     </dialog>
+    <dialog id="helpDialog" class="modal">
+      <div class="modal-head"><h3>使用说明</h3><button class="icon-button" type="button" data-close-dialog="helpDialog" aria-label="关闭">×</button></div>
+      <ul class="help-list">
+        <li>菜单：管理菜品、步骤，导入或导出排程。</li>
+        <li>表头：左右拖动排序，拖右边缘调宽。“无器具”列固定在最左。</li>
+        <li>卡片：拖动 ⠿ 调时间，上下边缘改时长，点卡片编辑。</li>
+        <li>齿轮：设置时间范围、比例尺和拖动步进。</li>
+        <li>曲线连接同菜步骤；底部连线表示结束汇合。</li>
+      </ul>
+      <p id="saveState" role="status">排程会自动保存在当前浏览器的缓存中。</p>
+    </dialog>
     <script src="vendor/fflate-0.8.2.min.js?v=c3b34f2e9f5e"></script>
-    <script src="app.js?v=8a8509f98b1d"></script>
+    <script src="app.js?v=754bc8aeeeab"></script>
   </body>
 </html>
